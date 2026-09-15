@@ -55,15 +55,23 @@ TEST(FacadesPdfPageEditorSmoke, GetPagesReal) {
     EXPECT_GT(editor.GetPages(), 0);
 }
 
-TEST(FacadesPdfPageEditorSmoke, GeometryStubs) {
+TEST(FacadesPdfPageEditorSmoke, GeometryAndApplyChanges) {
     Document doc{HelloWorldPdf()};
     PdfPageEditor editor{doc};
     auto sz = editor.GetPageSize(1);
     EXPECT_FLOAT_EQ(sz.Width(), 612.0f);
     EXPECT_FLOAT_EQ(sz.Height(), 792.0f);
     EXPECT_EQ(editor.GetPageRotation(1), 0);
-    editor.MovePosition(10, 20);  // no-throw
-    editor.ApplyChanges();        // no-throw
+
+    // Stage rotation and page size, then apply
+    editor.Rotation(90);
+    editor.PageSize(PageSize::A4());
+    editor.ApplyChanges();
+
+    EXPECT_EQ(editor.GetPageRotation(1), 90);
+    auto newSz = editor.GetPageSize(1);
+    EXPECT_NEAR(newSz.Width(), PageSize::A4().Width(), 1.0f);
+    EXPECT_NEAR(newSz.Height(), PageSize::A4().Height(), 1.0f);
 }
 
 TEST(FacadesPdfPageEditorSmoke, UnboundGetPagesZero) {

@@ -20,6 +20,7 @@
 #include <aspose/pdf/facades/pdf_file_signature.hpp>
 #include <aspose/pdf/facades/signature_name.hpp>
 #include <aspose/pdf/forms/doc_mdp_access_permissions.hpp>
+#include <aspose/pdf/forms/form.hpp>
 #include <aspose/pdf/forms/pkcs7.hpp>
 
 #include <gtest/gtest.h>
@@ -219,6 +220,9 @@ TEST(FacadesPdfFileSignatureRealSigning, SignAddsReadableSignature) {
     ASSERT_EQ(sn.size(), 1u);
     EXPECT_EQ(sn[0].Name, "Signature1");
     EXPECT_TRUE(sn[0].HasSignature());
+
+    reader.RemoveSignature("Signature1");
+    EXPECT_FALSE(signedDoc.Form().HasField("Signature1"));
 }
 
 TEST(FacadesPdfFileSignatureRealSigning, ByteRangeAndContentsAreWellFormed) {

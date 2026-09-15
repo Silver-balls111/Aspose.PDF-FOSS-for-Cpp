@@ -20,6 +20,7 @@
 #include <aspose/pdf/page.hpp>
 #include <aspose/pdf/page_collection.hpp>
 
+#include <fstream>
 #include <gtest/gtest.h>
 
 namespace {
@@ -108,6 +109,41 @@ TEST(FacadesPdfAnnotationEditorSmoke, StubsDoNotThrow) {
     editor.ModifyAnnotations(1, 1, tmpl);
 
     SUCCEED();
+}
+
+TEST(FacadesPdfAnnotationEditorSmoke, ImportFromXfdf) {
+    std::string xfdf = (std::filesystem::temp_directory_path() / "test_import.xfdf").string();
+    {
+        std::ofstream out(xfdf);
+        out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<xfdf xmlns=\"http://ns.adobe.com/xfdf/\">\n"
+            << "<annotations>\n"
+            << "  <square page=\"0\" rect=\"10,20,110,34\" title=\"Author1\" contents=\"Square Note\"/>\n"
+            << "  <text page=\"0\" rect=\"10,50,110,70\" title=\"Author2\" contents=\"Sticky Note\"/>\n"
+            << "</annotations>\n"
+            << "</xfdf>\n";
+    }
+
+    Document doc{HelloWorldPdf()};
+    PdfAnnotationEditor editor{doc};
+    editor.ImportAnnotationsFromXfdf(xfdf);
+
+    ASSERT_EQ(doc.Pages()[1].Annotations().Count(), 2);
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].Contents(), "Square Note");
+    EXPECT_EQ(doc.Pages()[1].Annotations()[1].Contents(), "Sticky Note");
+
+    // Test ModifyAnnotationsAuthor
+    editor.ModifyAnnotationsAuthor(1, 1, "Author1", "NewAuthor");
+    auto* ma = dynamic_cast<MarkupAnnotation*>(&doc.Pages()[1].Annotations()[0]);
+    ASSERT_NE(ma, nullptr);
+    EXPECT_EQ(ma->Title(), "NewAuthor");
+
+    // Test Flattening by type
+    editor.FlatteningAnnotations(1, 1, {AnnotationType::Square});
+    ASSERT_EQ(doc.Pages()[1].Annotations().Count(), 1);
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].AnnotationType(), AnnotationType::Text);
+
+    std::filesystem::remove(xfdf);
 }
 
 TEST(FacadesPdfAnnotationEditorSmoke, UnboundDeleteIsSafe) {

@@ -19,14 +19,56 @@ int PdfPageEditor::GetPages() {
                : static_cast<int>(document_->Pages().Count());
 }
 
-Aspose::Pdf::PageSize PdfPageEditor::GetPageSize(int) {
-    // v1 stub — canonical US-Letter default until Page exposes Rect/CropBox.
+Aspose::Pdf::PageSize PdfPageEditor::GetPageSize(int pageId) {
+    if (document_ != nullptr && pageId >= 1 &&
+        pageId <= static_cast<int>(document_->Pages().Count())) {
+        auto p = document_->Pages()[pageId];
+        return Aspose::Pdf::PageSize(static_cast<float>(p.Rect().Width()),
+                                     static_cast<float>(p.Rect().Height()));
+    }
     return Aspose::Pdf::PageSize::PageLetter();
 }
 
-int PdfPageEditor::GetPageRotation(int) { return 0; }
+int PdfPageEditor::GetPageRotation(int pageId) {
+    if (document_ != nullptr && pageId >= 1 &&
+        pageId <= static_cast<int>(document_->Pages().Count())) {
+        auto r = document_->Pages()[pageId].Rotate();
+        switch (r) {
+            case Aspose::Pdf::Rotation::on90: return 90;
+            case Aspose::Pdf::Rotation::on180: return 180;
+            case Aspose::Pdf::Rotation::on270: return 270;
+            default: return 0;
+        }
+    }
+    return 0;
+}
 
-void PdfPageEditor::ApplyChanges() {}
+void PdfPageEditor::ApplyChanges() {
+    if (document_ == nullptr) return;
+    const int count = static_cast<int>(document_->Pages().Count());
+    std::vector<int> targets;
+    if (process_pages_.empty()) {
+        for (int i = 1; i <= count; ++i) targets.push_back(i);
+    } else {
+        for (int p : process_pages_) {
+            if (p >= 1 && p <= count) targets.push_back(p);
+        }
+    }
+
+    for (int pNum : targets) {
+        auto page = document_->Pages()[pNum];
+        if (rotation_ != 0) {
+            Aspose::Pdf::Rotation rot = Aspose::Pdf::Rotation::None;
+            if (rotation_ == 90) rot = Aspose::Pdf::Rotation::on90;
+            else if (rotation_ == 180) rot = Aspose::Pdf::Rotation::on180;
+            else if (rotation_ == 270) rot = Aspose::Pdf::Rotation::on270;
+            page.Rotate(rot);
+        }
+        if (page_size_.Width() > 0 && page_size_.Height() > 0) {
+            page.SetPageSize(page_size_.Width(), page_size_.Height());
+        }
+    }
+}
 
 int PdfPageEditor::TransitionDuration() const noexcept {
     return transition_duration_;

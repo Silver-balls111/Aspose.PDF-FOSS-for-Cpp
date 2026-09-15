@@ -101,22 +101,29 @@ TEST(FacadesFormEditorSmoke, UnboundAddFieldReturnsFalse) {
     editor.RemoveField("x");  // safe no-op
 }
 
-TEST(FacadesFormEditorSmoke, ConfigurationStubs) {
+TEST(FacadesFormEditorSmoke, ConfigurationReal) {
     Document doc{HelloWorldPdf()};
     FormEditor editor{doc};
     editor.AddField(FieldType::Text, "f", 1, 100, 600, 300, 620);
 
-    EXPECT_FALSE(editor.SetFieldAttribute("f", PropertyFlag::ReadOnly));
-    EXPECT_FALSE(editor.SetFieldLimit("f", 10));
-    EXPECT_FALSE(editor.SetFieldScript("f", "app.alert('x')"));
-    EXPECT_FALSE(editor.Single2Multiple("f"));
-    EXPECT_FALSE(editor.MoveField("f", 0, 0, 10, 10));
+    EXPECT_TRUE(editor.SetFieldAttribute("f", PropertyFlag::ReadOnly));
+    EXPECT_TRUE(editor.SetFieldLimit("f", 10));
+    EXPECT_TRUE(editor.SetFieldScript("f", "app.alert('x')"));
+    EXPECT_TRUE(editor.Single2Multiple("f"));
+    EXPECT_TRUE(editor.MoveField("f", 50, 50, 150, 150));
 
-    // void stubs must not throw.
     editor.RenameField("f", "g");
-    editor.DecorateField("f");
-    editor.AddListItem("f", "item");
-    editor.AddListItem("f", std::vector<std::string>{"a", "b"});
+    EXPECT_TRUE(doc.Form().HasField("g"));
+    EXPECT_FALSE(doc.Form().HasField("f"));
+
+    editor.AddField(FieldType::ComboBox, "combo", 1, 100, 500, 200, 520);
+    editor.AddListItem("combo", "item1");
+    editor.AddListItem("combo", std::vector<std::string>{"item2", "item3"});
+    editor.DelListItem("combo", "item2");
+
+    editor.DecorateField("g");
+    editor.DecorateField(FieldType::Text);
+    editor.DecorateField();
     editor.ResetFacade();
     SUCCEED();
 }

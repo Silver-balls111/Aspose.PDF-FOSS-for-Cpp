@@ -9,10 +9,12 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
 #include <aspose/pdf/document.hpp>
+#include <aspose/pdf/embedded_file_collection.hpp>
 #include <aspose/pdf/facades/pdf_content_editor.hpp>
 
 #include <gtest/gtest.h>
@@ -78,14 +80,21 @@ TEST(FacadesPdfContentEditorSmoke, EditorStubsDoNotThrow) {
     SUCCEED();
 }
 
-TEST(FacadesPdfContentEditorSmoke, SavePassesThrough) {
+TEST(FacadesPdfContentEditorSmoke, AttachmentsAddAndDelete) {
     Document doc{HelloWorldPdf()};
     PdfContentEditor editor{doc};
-    editor.ReplaceText("x", "y");  // no-op
-    const std::string out =
-        (std::filesystem::temp_directory_path() /
-         "aspose_contenteditor_save.pdf").string();
-    editor.Save(out);  // inherited SaveableFacade::Save — passthrough
-    EXPECT_TRUE(std::filesystem::exists(out));
-    std::filesystem::remove(out);
+
+    std::string sampleAttachment = (std::filesystem::temp_directory_path() / "sample_attach.txt").string();
+    {
+        std::ofstream out(sampleAttachment);
+        out << "Attachment file content";
+    }
+
+    editor.AddDocumentAttachment(sampleAttachment, "Sample Attachment Description");
+    EXPECT_EQ(doc.EmbeddedFiles().Count(), 1);
+
+    editor.DeleteAttachments();
+    EXPECT_EQ(doc.EmbeddedFiles().Count(), 0);
+
+    std::filesystem::remove(sampleAttachment);
 }

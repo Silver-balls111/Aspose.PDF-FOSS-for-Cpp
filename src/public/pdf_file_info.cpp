@@ -1,5 +1,6 @@
 #include <aspose/pdf/facades/pdf_file_info.hpp>
 
+#include <fstream>
 #include <utility>
 
 #include <aspose/pdf/document.hpp>
@@ -65,17 +66,71 @@ void PdfFileInfo::SetMetaInfo(const std::string& name,
     extra_meta_[name] = value;
 }
 
-// v1 page-geometry stubs (canonical defaults: US Letter, no rotation).
-float PdfFileInfo::GetPageHeight(int /*pageNum*/) const { return 792.0f; }
-float PdfFileInfo::GetPageRotation(int /*pageNum*/) const { return 0.0f; }
-float PdfFileInfo::GetPageWidth(int /*pageNum*/) const { return 612.0f; }
-float PdfFileInfo::GetPageXOffset(int /*pageNum*/) const { return 0.0f; }
-float PdfFileInfo::GetPageYOffset(int /*pageNum*/) const { return 0.0f; }
+// Real page-geometry accessors
+float PdfFileInfo::GetPageHeight(int pageNum) const {
+    if (auto* doc = const_cast<Aspose::Pdf::Document*>(Document()); doc != nullptr) {
+        if (pageNum >= 1 && pageNum <= static_cast<int>(doc->Pages().Count())) {
+            return static_cast<float>(doc->Pages()[pageNum].Rect().Height());
+        }
+    }
+    return 792.0f;
+}
+
+float PdfFileInfo::GetPageRotation(int pageNum) const {
+    if (auto* doc = const_cast<Aspose::Pdf::Document*>(Document()); doc != nullptr) {
+        if (pageNum >= 1 && pageNum <= static_cast<int>(doc->Pages().Count())) {
+            auto rot = doc->Pages()[pageNum].Rotate();
+            switch (rot) {
+                case Aspose::Pdf::Rotation::on90: return 90.0f;
+                case Aspose::Pdf::Rotation::on180: return 180.0f;
+                case Aspose::Pdf::Rotation::on270: return 270.0f;
+                default: return 0.0f;
+            }
+        }
+    }
+    return 0.0f;
+}
+
+float PdfFileInfo::GetPageWidth(int pageNum) const {
+    if (auto* doc = const_cast<Aspose::Pdf::Document*>(Document()); doc != nullptr) {
+        if (pageNum >= 1 && pageNum <= static_cast<int>(doc->Pages().Count())) {
+            return static_cast<float>(doc->Pages()[pageNum].Rect().Width());
+        }
+    }
+    return 612.0f;
+}
+
+float PdfFileInfo::GetPageXOffset(int pageNum) const {
+    if (auto* doc = const_cast<Aspose::Pdf::Document*>(Document()); doc != nullptr) {
+        if (pageNum >= 1 && pageNum <= static_cast<int>(doc->Pages().Count())) {
+            return static_cast<float>(doc->Pages()[pageNum].Rect().LLX());
+        }
+    }
+    return 0.0f;
+}
+
+float PdfFileInfo::GetPageYOffset(int pageNum) const {
+    if (auto* doc = const_cast<Aspose::Pdf::Document*>(Document()); doc != nullptr) {
+        if (pageNum >= 1 && pageNum <= static_cast<int>(doc->Pages().Count())) {
+            return static_cast<float>(doc->Pages()[pageNum].Rect().LLY());
+        }
+    }
+    return 0.0f;
+}
 
 std::string PdfFileInfo::GetPdfVersion() const {
-    // v1 returns canonical default. Real %PDF-x.y header parse
-    // lands when Document exposes the parsed PDF version.
-    return "1.4";
+    if (!input_file_.empty()) {
+        std::ifstream f(input_file_, std::ios::binary);
+        if (f.is_open()) {
+            std::string header;
+            std::getline(f, header);
+            auto pos = header.find("%PDF-");
+            if (pos != std::string::npos && pos + 8 <= header.size()) {
+                return header.substr(pos + 5, 3);
+            }
+        }
+    }
+    return "1.7";
 }
 
 bool PdfFileInfo::SaveNewInfo(const std::string& outputFile) {
@@ -213,7 +268,7 @@ int PdfFileInfo::NumberOfPages() const noexcept {
 Aspose::Pdf::PasswordType PdfFileInfo::PasswordType() const noexcept {
     return password_type_;
 }
-bool PdfFileInfo::HasOpenPassword() const noexcept { return false; }
-bool PdfFileInfo::HasEditPassword() const noexcept { return false; }
+bool PdfFileInfo::HasOpenPassword() const noexcept { return IsEncrypted(); }
+bool PdfFileInfo::HasEditPassword() const noexcept { return IsEncrypted(); }
 
 }  // namespace Aspose::Pdf::Facades

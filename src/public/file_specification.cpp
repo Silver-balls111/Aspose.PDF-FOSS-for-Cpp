@@ -1,27 +1,44 @@
 #include <aspose/pdf/file_specification.hpp>
 
+#include <fstream>
 #include <utility>
 
 namespace Aspose::Pdf {
 
+namespace {
+std::vector<std::byte> ReadFileBytes(const std::string& path) {
+    std::ifstream is(path, std::ios::binary | std::ios::ate);
+    if (!is) return {};
+    auto sz = is.tellg();
+    if (sz <= 0) return {};
+    is.seekg(0, std::ios::beg);
+    std::vector<std::byte> buf(static_cast<std::size_t>(sz));
+    is.read(reinterpret_cast<char*>(buf.data()), sz);
+    return buf;
+}
+}  // namespace
+
 FileSpecification::FileSpecification(std::string file)
     : file_(std::move(file)),
       name_(file_),
-      unicode_name_(file_) {}
+      unicode_name_(file_),
+      content_(ReadFileBytes(name_)) {}
 
 FileSpecification::FileSpecification(std::string file,
                                      std::string description)
     : file_(std::move(file)),
       description_(std::move(description)),
       name_(file_),
-      unicode_name_(file_) {}
+      unicode_name_(file_),
+      content_(ReadFileBytes(name_)) {}
 
 FileSpecification::FileSpecification(std::string fileName,
                                      Aspose::Pdf::Annotations::Annotation& annot)
     : file_(std::move(fileName)),
       name_(file_),
       unicode_name_(file_),
-      annot_(&annot) {}
+      annot_(&annot),
+      content_(ReadFileBytes(name_)) {}
 
 void FileSpecification::Dispose() {
     file_.clear();

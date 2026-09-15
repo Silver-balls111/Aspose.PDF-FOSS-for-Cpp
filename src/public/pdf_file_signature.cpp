@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <aspose/pdf/document.hpp>
+#include <aspose/pdf/forms/form.hpp>
 #include <aspose/pdf/forms/signature.hpp>
 
 #include "pkcs7_sign.hpp"
@@ -197,17 +198,44 @@ int PdfFileSignature::GetTotalRevision() {
     return rev;
 }
 
-// ===== Remove — v1 stubs =====================================================
-// Removing a signature requires rewriting the AcroForm /Fields and the page
-// /Annots and invalidating the prior revision; deferred past the signing
-// floor.
+// ===== Remove ================================================================
+// Removing a signature from the document removes the field from AcroForm.
 
 void PdfFileSignature::RemoveUsageRights() {}
-void PdfFileSignature::RemoveSignature(const std::string&) {}
-void PdfFileSignature::RemoveSignature(const SignatureName&) {}
-void PdfFileSignature::RemoveSignature(const std::string&, bool) {}
-void PdfFileSignature::RemoveSignature(const SignatureName&, bool) {}
-void PdfFileSignature::RemoveSignatures() {}
+
+void PdfFileSignature::RemoveSignature(const std::string& sigName) {
+    if (document_ == nullptr) return;
+    document_->Form().Delete(sigName);
+}
+
+void PdfFileSignature::RemoveSignature(const SignatureName& sigName) {
+    RemoveSignature(sigName.Name);
+}
+
+void PdfFileSignature::RemoveSignature(const std::string& sigName,
+                                       bool keepFieldEmpty) {
+    if (document_ == nullptr) return;
+    if (keepFieldEmpty) {
+        auto* w = document_->Form()[sigName];
+        if (auto* field = dynamic_cast<Forms::Field*>(w)) {
+            field->Value("");
+        }
+    } else {
+        document_->Form().Delete(sigName);
+    }
+}
+
+void PdfFileSignature::RemoveSignature(const SignatureName& sigName,
+                                       bool keepFieldEmpty) {
+    RemoveSignature(sigName.Name, keepFieldEmpty);
+}
+
+void PdfFileSignature::RemoveSignatures() {
+    if (document_ == nullptr) return;
+    for (const auto& name : GetSignNames(false)) {
+        document_->Form().Delete(name);
+    }
+}
 
 // ===== Verify / read =========================================================
 

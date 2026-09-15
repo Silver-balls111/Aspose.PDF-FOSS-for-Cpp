@@ -112,7 +112,12 @@ std::vector<std::string> PdfExtractor::GetAttachNames() {
     return document_->AttachmentNamesInternal();
 }
 
-void PdfExtractor::ExtractAttachment() {}
+void PdfExtractor::ExtractAttachment() {
+    if (document_ == nullptr) return;
+    for (const auto& name : GetAttachNames()) {
+        document_->ExtractAttachmentInternal(name, name);
+    }
+}
 
 void PdfExtractor::ExtractAttachment(const std::string& attachmentFileName) {
     // Write the named attachment's bytes to a file of that name.

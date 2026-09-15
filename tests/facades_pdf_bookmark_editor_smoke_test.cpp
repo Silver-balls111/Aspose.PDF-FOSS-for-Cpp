@@ -198,17 +198,40 @@ TEST(PdfBookmarkEditorRealSmoke, NestedBookmarksRoundTrip) {
     std::filesystem::remove(out);
 }
 
-TEST(PdfBookmarkEditorRealSmoke, DeleteClearsOutlines) {
-    const std::string out = BmTmp("del.pdf");
+TEST(PdfBookmarkEditorRealSmoke, XmlAndHtmlExportImport) {
+    const std::string xmlFile = BmTmp("export.xml");
+    const std::string htmlFile = BmTmp("export.html");
+    const std::string pdfOut = BmTmp("imported_bms.pdf");
+
+    // Create bookmarks and export to XML & HTML
     {
         Document doc{TwoPagesPdf()};
         PdfBookmarkEditor ed{doc};
-        ed.CreateBookmarkOfPage("Temp", 1);
-        ed.DeleteBookmarks();
-        ed.Save(out);
+        ed.CreateBookmarkOfPage("Chapter 1: Start", 1);
+        ed.CreateBookmarkOfPage("Chapter 2: Finish", 2);
+        ed.ExportBookmarksToXML(xmlFile);
+        ed.ExportBookmarksToHtml(TwoPagesPdf(), htmlFile);
     }
-    Document re{out};
-    PdfBookmarkEditor ed2{re};
-    EXPECT_TRUE(ed2.ExtractBookmarks().empty());
-    std::filesystem::remove(out);
+
+    EXPECT_TRUE(std::filesystem::exists(xmlFile));
+    EXPECT_TRUE(std::filesystem::exists(htmlFile));
+
+    // Import from XML into a new document
+    {
+        Document doc2{TwoPagesPdf()};
+        PdfBookmarkEditor ed2{doc2};
+        ed2.ImportBookmarksWithXML(xmlFile);
+        ed2.Save(pdfOut);
+    }
+
+    Document re{pdfOut};
+    PdfBookmarkEditor ed3{re};
+    Bookmarks bms = ed3.ExtractBookmarks();
+    ASSERT_EQ(bms.size(), 2u);
+    EXPECT_EQ(bms[0].Title(), "Chapter 1: Start");
+    EXPECT_EQ(bms[1].Title(), "Chapter 2: Finish");
+
+    std::filesystem::remove(xmlFile);
+    std::filesystem::remove(htmlFile);
+    std::filesystem::remove(pdfOut);
 }

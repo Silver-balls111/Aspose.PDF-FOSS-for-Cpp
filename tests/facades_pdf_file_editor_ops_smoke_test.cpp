@@ -124,3 +124,43 @@ TEST(PdfFileEditorOpsSmoke, SplitToPages) {
     }
     std::filesystem::remove(src);
 }
+
+TEST(PdfFileEditorOpsSmoke, MakeBooklet) {
+    const std::string out = Tmp("booklet.pdf");
+    PdfFileEditor ed;
+    ASSERT_TRUE(ed.MakeBooklet(TwoPagesPdf(), out));
+    Document re{out};
+    EXPECT_EQ(re.Pages().Count(), 4u);  // 2 pages rounded up to 4 for booklet
+    std::filesystem::remove(out);
+}
+
+TEST(PdfFileEditorOpsSmoke, MakeNUp) {
+    const std::string out = Tmp("nup.pdf");
+    PdfFileEditor ed;
+    ASSERT_TRUE(ed.MakeNUp(HelloWorldPdf(), TwoPagesPdf(), out));
+    Document re{out};
+    EXPECT_EQ(re.Pages().Count(), 3u);  // 1 + 2
+    std::filesystem::remove(out);
+}
+
+TEST(PdfFileEditorOpsSmoke, ResizeContents) {
+    const std::string out = Tmp("resize.pdf");
+    PdfFileEditor ed;
+    ASSERT_TRUE(ed.ResizeContentsPct(HelloWorldPdf(), out, 50.0, 50.0));
+    Document re{out};
+    EXPECT_EQ(re.Pages().Count(), 1u);
+    auto page = re.Pages()[1];
+    EXPECT_GT(page.Rect().Width(), 0.0);
+    EXPECT_GT(page.Rect().Height(), 0.0);
+    std::filesystem::remove(out);
+}
+
+TEST(PdfFileEditorOpsSmoke, AddMargins) {
+    const std::string out = Tmp("margins.pdf");
+    PdfFileEditor ed;
+    ASSERT_TRUE(ed.AddMargins(HelloWorldPdf(), out, {1}, 10, 10, 20, 20));
+    Document re{out};
+    EXPECT_EQ(re.Pages().Count(), 1u);
+    std::filesystem::remove(out);
+}
+

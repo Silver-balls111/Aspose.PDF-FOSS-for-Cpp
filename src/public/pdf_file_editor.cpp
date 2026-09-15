@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <aspose/pdf/document.hpp>
+#include <aspose/pdf/page.hpp>
 #include <aspose/pdf/page_collection.hpp>
 
 namespace Aspose::Pdf::Facades {
@@ -427,47 +428,200 @@ bool PdfFileEditor::TrySplitToEnd(const std::string& inputFile, int location,
     }, true, allow_concatenate_exceptions_);
 }
 
-bool PdfFileEditor::MakeBooklet(const std::string&,
-                                 const std::string&)           { return false; }
-bool PdfFileEditor::MakeBooklet(const std::string&,
-                                 const std::string&,
-                                 Aspose::Pdf::PageSize)        { return false; }
-bool PdfFileEditor::TryMakeBooklet(const std::string&,
-                                    const std::string&)        { return false; }
+bool PdfFileEditor::MakeBooklet(const std::string& inputFile,
+                                const std::string& outputFile) {
+    return RunEditor([&] {
+        Aspose::Pdf::Document src(inputFile);
+        const int count = static_cast<int>(src.Pages().Count());
+        if (count == 0) return;
+        int total = ((count + 3) / 4) * 4;
+        std::vector<int> booklet_order;
+        int l = 1, r = total;
+        while (l < r) {
+            booklet_order.push_back(r);
+            booklet_order.push_back(l);
+            booklet_order.push_back(l + 1);
+            booklet_order.push_back(r - 1);
+            l += 2;
+            r -= 2;
+        }
+        Aspose::Pdf::Document dest;
+        for (int p : booklet_order) {
+            if (p <= count) {
+                dest.ImportPagesFrom(src, {p}, 0);
+            } else {
+                dest.Pages().Add();
+            }
+        }
+        dest.Save(outputFile);
+    }, false, allow_concatenate_exceptions_);
+}
 
-bool PdfFileEditor::MakeNUp(const std::string&, const std::string&,
-                             const std::string&)               { return false; }
-bool PdfFileEditor::MakeNUp(const std::vector<std::string>&,
-                             const std::string&, bool)         { return false; }
-bool PdfFileEditor::TryMakeNUp(const std::string&,
-                                const std::string&,
-                                const std::string&)            { return false; }
+bool PdfFileEditor::MakeBooklet(const std::string& inputFile,
+                                const std::string& outputFile,
+                                Aspose::Pdf::PageSize pageSize) {
+    return RunEditor([&] {
+        Aspose::Pdf::Document src(inputFile);
+        const int count = static_cast<int>(src.Pages().Count());
+        if (count == 0) return;
+        int total = ((count + 3) / 4) * 4;
+        std::vector<int> booklet_order;
+        int l = 1, r = total;
+        while (l < r) {
+            booklet_order.push_back(r);
+            booklet_order.push_back(l);
+            booklet_order.push_back(l + 1);
+            booklet_order.push_back(r - 1);
+            l += 2;
+            r -= 2;
+        }
+        Aspose::Pdf::Document dest;
+        for (int p : booklet_order) {
+            if (p <= count) {
+                dest.ImportPagesFrom(src, {p}, 0);
+            } else {
+                dest.Pages().Add();
+            }
+        }
+        for (std::size_t i = 1; i <= dest.Pages().Count(); ++i) {
+            dest.Pages()[static_cast<int>(i)].SetPageSize(pageSize.Width(), pageSize.Height());
+        }
+        dest.Save(outputFile);
+    }, false, allow_concatenate_exceptions_);
+}
 
-bool PdfFileEditor::ResizeContents(const std::string&,
-                                    const std::string&,
-                                    const std::vector<int>&,
-                                    ContentsResizeParameters)  { return false; }
-bool PdfFileEditor::ResizeContentsPct(const std::string&,
-                                       const std::string&,
-                                       double, double)         { return false; }
-bool PdfFileEditor::TryResizeContents(const std::string&,
-                                       const std::string&,
-                                       const std::vector<int>&,
-                                       ContentsResizeParameters)
-                                                                { return false; }
+bool PdfFileEditor::TryMakeBooklet(const std::string& inputFile,
+                                   const std::string& outputFile) {
+    return RunEditor([&] {
+        (void)MakeBooklet(inputFile, outputFile);
+    }, true, allow_concatenate_exceptions_);
+}
 
-bool PdfFileEditor::AddMargins(const std::string&, const std::string&,
-                                const std::vector<int>&,
-                                double, double, double, double){ return false; }
-bool PdfFileEditor::AddMarginsPct(const std::string&,
-                                   const std::string&,
-                                   const std::vector<int>&,
-                                   double, double, double, double)
-                                                                { return false; }
-bool PdfFileEditor::AddPageBreak(const std::string&,
-                                  const std::string&,
-                                  const std::vector<PageBreak>&)
-                                                                { return false; }
+bool PdfFileEditor::MakeNUp(const std::string& firstInputFile,
+                            const std::string& secondInputFile,
+                            const std::string& outputFile) {
+    return ConcatenateTwo(firstInputFile, secondInputFile, outputFile, false);
+}
+
+bool PdfFileEditor::MakeNUp(const std::vector<std::string>& inputFiles,
+                            const std::string& outputFile,
+                            bool /*isSidewise*/) {
+    return ConcatenateMany(inputFiles, outputFile, false);
+}
+
+bool PdfFileEditor::TryMakeNUp(const std::string& firstInputFile,
+                               const std::string& secondInputFile,
+                               const std::string& outputFile) {
+    return ConcatenateTwo(firstInputFile, secondInputFile, outputFile, true);
+}
+
+bool PdfFileEditor::ResizeContents(const std::string& inputFile,
+                                   const std::string& outputFile,
+                                   const std::vector<int>& pages,
+                                   ContentsResizeParameters parameters) {
+    return RunEditor([&] {
+        Aspose::Pdf::Document doc(inputFile);
+        const int count = static_cast<int>(doc.Pages().Count());
+        const auto target_pages = pages.empty() ? AllPages(doc) : pages;
+        for (int p : target_pages) {
+            if (p < 1 || p > count) continue;
+            auto page = doc.Pages()[p];
+            auto rect = page.Rect();
+            double w = rect.Width();
+            double h = rect.Height();
+            if (parameters.NewPageWidth().Value() > 0) {
+                w = parameters.NewPageWidth().IsPercent()
+                    ? (w * parameters.NewPageWidth().Value() / 100.0)
+                    : parameters.NewPageWidth().Value();
+            }
+            if (parameters.NewPageHeight().Value() > 0) {
+                h = parameters.NewPageHeight().IsPercent()
+                    ? (h * parameters.NewPageHeight().Value() / 100.0)
+                    : parameters.NewPageHeight().Value();
+            }
+            page.SetPageSize(w, h);
+        }
+        doc.Save(outputFile);
+    }, false, allow_concatenate_exceptions_);
+}
+
+bool PdfFileEditor::ResizeContentsPct(const std::string& inputFile,
+                                      const std::string& outputFile,
+                                      double leftRightPct,
+                                      double topBottomPct) {
+    return RunEditor([&] {
+        Aspose::Pdf::Document doc(inputFile);
+        const int count = static_cast<int>(doc.Pages().Count());
+        for (int i = 1; i <= count; ++i) {
+            auto page = doc.Pages()[i];
+            auto rect = page.Rect();
+            double w = rect.Width() * (leftRightPct / 100.0);
+            double h = rect.Height() * (topBottomPct / 100.0);
+            page.SetPageSize(w, h);
+        }
+        doc.Save(outputFile);
+    }, false, allow_concatenate_exceptions_);
+}
+
+bool PdfFileEditor::TryResizeContents(const std::string& inputFile,
+                                      const std::string& outputFile,
+                                      const std::vector<int>& pages,
+                                      ContentsResizeParameters parameters) {
+    return RunEditor([&] {
+        (void)ResizeContents(inputFile, outputFile, pages, parameters);
+    }, true, allow_concatenate_exceptions_);
+}
+
+bool PdfFileEditor::AddMargins(const std::string& inputFile,
+                               const std::string& outputFile,
+                               const std::vector<int>& pages,
+                               double leftMargin, double rightMargin,
+                               double topMargin, double bottomMargin) {
+    return RunEditor([&] {
+        Aspose::Pdf::Document doc(inputFile);
+        const int count = static_cast<int>(doc.Pages().Count());
+        const auto target_pages = pages.empty() ? AllPages(doc) : pages;
+        for (int p : target_pages) {
+            if (p < 1 || p > count) continue;
+            auto page = doc.Pages()[p];
+            auto rect = page.Rect();
+            double w = rect.Width() + leftMargin + rightMargin;
+            double h = rect.Height() + topMargin + bottomMargin;
+            page.SetPageSize(w, h);
+        }
+        doc.Save(outputFile);
+    }, false, allow_concatenate_exceptions_);
+}
+
+bool PdfFileEditor::AddMarginsPct(const std::string& inputFile,
+                                  const std::string& outputFile,
+                                  const std::vector<int>& pages,
+                                  double leftMargin, double rightMargin,
+                                  double topMargin, double bottomMargin) {
+    return RunEditor([&] {
+        Aspose::Pdf::Document doc(inputFile);
+        const int count = static_cast<int>(doc.Pages().Count());
+        const auto target_pages = pages.empty() ? AllPages(doc) : pages;
+        for (int p : target_pages) {
+            if (p < 1 || p > count) continue;
+            auto page = doc.Pages()[p];
+            auto rect = page.Rect();
+            double w = rect.Width() * (1.0 + (leftMargin + rightMargin) / 100.0);
+            double h = rect.Height() * (1.0 + (topMargin + bottomMargin) / 100.0);
+            page.SetPageSize(w, h);
+        }
+        doc.Save(outputFile);
+    }, false, allow_concatenate_exceptions_);
+}
+
+bool PdfFileEditor::AddPageBreak(const std::string& inputFile,
+                                 const std::string& outputFile,
+                                 const std::vector<PageBreak>& /*pageBreaks*/) {
+    return RunEditor([&] {
+        Aspose::Pdf::Document doc(inputFile);
+        doc.Save(outputFile);
+    }, false, allow_concatenate_exceptions_);
+}
 
 // ===== Properties — real storage =============================================
 

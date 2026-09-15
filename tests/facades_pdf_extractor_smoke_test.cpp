@@ -12,6 +12,7 @@
 #include <string>
 
 #include <aspose/pdf/document.hpp>
+#include <aspose/pdf/embedded_file_collection.hpp>
 #include <aspose/pdf/facades/pdf_extractor.hpp>
 
 #include <gtest/gtest.h>
@@ -137,3 +138,33 @@ TEST(FacadesPdfExtractorSmoke, ImageAndAttachmentStubs) {
     ex.ExtractAttachment("anything.dat");   // no-op
     ex.GetAttachment(TempOut("aspose_extractor_att.bin"));  // no-op
 }
+
+TEST(FacadesPdfExtractorSmoke, AttachmentExtractionReal) {
+    // Create a temp file to attach
+    const std::string attachFile = TempOut("sample_attach.txt");
+    {
+        std::ofstream f(attachFile);
+        f << "attachment payload content";
+    }
+
+    Document doc{TwoPagesPdf()};
+    doc.EmbeddedFiles().Add(FileSpecification(attachFile, "Test description"));
+
+    PdfExtractor ex{doc};
+    auto names = ex.GetAttachNames();
+    ASSERT_EQ(names.size(), 1u);
+    EXPECT_NE(names[0].find("sample_attach.txt"), std::string::npos);
+
+    auto infos = ex.GetAttachmentInfo();
+    ASSERT_EQ(infos.size(), 1u);
+    EXPECT_EQ(infos[0].Description(), "Test description");
+
+    const std::string extractedOut = TempOut("extracted_attach.txt");
+    ex.GetAttachment(extractedOut);
+    ASSERT_TRUE(std::filesystem::exists(extractedOut));
+    EXPECT_EQ(ReadFile(extractedOut), "attachment payload content");
+
+    std::filesystem::remove(attachFile);
+    std::filesystem::remove(extractedOut);
+}
+
