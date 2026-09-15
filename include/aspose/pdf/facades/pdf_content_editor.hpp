@@ -42,7 +42,7 @@ public:
     PdfContentEditor() noexcept = default;
     explicit PdfContentEditor(Aspose::Pdf::Document& document);
 
-    // ---- Attachments (v1 stubs) ----
+    // ---- Attachments (real) ----
     void AddDocumentAttachment(const std::string& path,
                                const std::string& description);
     void DeleteAttachments();
@@ -56,7 +56,7 @@ public:
     void ChangeViewerPreference(int pageLayout);
     int GetViewerPreference();
 
-    // ---- Image (DeleteImage real; ReplaceImage v1 stub) ----
+    // ---- Image (DeleteImage & ReplaceImage real) ----
     void ReplaceImage(int pageNum, int imageNum, const std::string& fileName);
     void DeleteImage(int pageNum, const std::vector<int>& imageNum);
     void DeleteImage();

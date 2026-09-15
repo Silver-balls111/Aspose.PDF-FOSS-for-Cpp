@@ -48,7 +48,7 @@ public:
     PdfAnnotationEditor() noexcept = default;
     explicit PdfAnnotationEditor(Aspose::Pdf::Document& document);
 
-    // ---- Import (v1 stubs — XFDF/FDF parsing deferred) ----
+    // ---- Import ----
 
     void ImportAnnotationsFromXfdf(const std::string& xfdfFile);
     void ImportAnnotationsFromFdf(const std::string& fdfFile);
@@ -61,7 +61,7 @@ public:
         const std::vector<Aspose::Pdf::Annotations::AnnotationType>& annotType);
     void ImportAnnotations(const std::vector<std::string>& annotFile);
 
-    // ---- Modify (v1 stubs) ----
+    // ---- Modify ----
 
     void ModifyAnnotations(int start, int end,
                            Aspose::Pdf::Annotations::Annotation& annotation);
@@ -69,7 +69,7 @@ public:
                                  const std::string& srcAuthor,
                                  const std::string& desAuthor);
 
-    // ---- Flatten (v1 stubs — render path deferred) ----
+    // ---- Flatten ----
 
     void FlatteningAnnotations();
     void FlatteningAnnotations(

@@ -150,8 +150,7 @@ public:
 
     // ---- Concatenate ----
 
-    // Concatenate(firstFile, secondFile, outputFile) — most-used
-    // overload. v1 stub returns false.
+    // Concatenate(firstFile, secondFile, outputFile) — concatenates two files.
     bool Concatenate(const std::string& firstInputFile,
                      const std::string& secondInputFile,
                      const std::string& outputFile);

@@ -32,7 +32,7 @@ public:
     PdfBookmarkEditor() noexcept = default;
     explicit PdfBookmarkEditor(Aspose::Pdf::Document& document);
 
-    // ---- Create (v1 stubs) ----
+    // ---- Create ----
 
     void CreateBookmarks();
     void CreateBookmarks(const Bookmark& bookmark);
@@ -40,21 +40,21 @@ public:
     void CreateBookmarkOfPage(const std::vector<std::string>& title,
                               const std::vector<int>& pageNumber);
 
-    // ---- Delete / Modify (v1 stubs) ----
+    // ---- Delete / Modify ----
 
     void DeleteBookmarks();
     void DeleteBookmarks(const std::string& title);
     void ModifyBookmarks(const std::string& oldTitle,
                          const std::string& newTitle);
 
-    // ---- Extract (v1 stubs — return empty Bookmarks) ----
+    // ---- Extract ----
 
     Bookmarks ExtractBookmarks();
     Bookmarks ExtractBookmarks(bool keepLevels);
     Bookmarks ExtractBookmarks(const std::string& title);
     Bookmarks ExtractBookmarks(const Bookmark& parent);
 
-    // ---- Import / Export (v1 stubs) ----
+    // ---- Import / Export ----
 
     void ExtractBookmarksToHTML(const std::string& dataDir,
                                 const std::string& outputFile);

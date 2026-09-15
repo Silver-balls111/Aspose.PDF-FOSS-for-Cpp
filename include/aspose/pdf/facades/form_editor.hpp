@@ -6,12 +6,11 @@
 // Aspose.Pdf.Facades.FormEditor; extends SaveableFacade.
 //
 // Input-file -> output-file (SrcFileName / DestFileName) or bound
-// Document. AddField and RemoveField are REAL — they construct the
-// concrete Field for the requested FieldType and route through the bound
-// document's AcroForm (Document::Form().Add / Delete), persisting on
-// Save via the AcroForm save-through. The remaining field-configuration
-// operations (Set*/Copy*/Decorate*/list-item/script/alignment) are v1
-// stubs.
+// Document. AddField and RemoveField construct the concrete Field for
+// the requested FieldType and route through the bound document's
+// AcroForm (Document::Form().Add / Delete). Field configuration
+// operations (Set*/Copy*/Decorate*/list-item/script/alignment) mutate
+// the bound field attributes and geometry.
 //
 // Phased drops:
 //   * Stream ctors / SrcStream / DestStream — Stream cascade.
@@ -58,7 +57,7 @@ public:
                   float llx, float lly, float urx, float ury);
     void RemoveField(const std::string& fieldName);
 
-    // ---- Field configuration (v1 stubs) ----
+    // ---- Field configuration ----
 
     bool SetFieldAttribute(const std::string& fieldName, PropertyFlag flag);
     bool SetFieldAppearance(

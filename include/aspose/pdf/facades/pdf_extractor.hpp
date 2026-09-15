@@ -75,7 +75,7 @@ public:
     bool HasNextImage();
     bool GetNextImage(const std::string& outputFile);
 
-    // ---- Attachment extraction (v1 stubs) ----
+    // ---- Attachment extraction (real) ----
 
     std::vector<std::string> GetAttachNames();
     void ExtractAttachment();
