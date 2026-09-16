@@ -604,7 +604,15 @@ void Lz77(const std::uint8_t* data,
         int chain_steps = kMaxChain;
         const std::size_t min_pos =
             (i > kWindow) ? (i - kWindow) : 0;
+        // A match can never exceed the remaining block bytes; when the
+        // current best already fills that, no chain candidate can win
+        // (only strictly longer matches are accepted below) and the
+        // pre-check's `data[i + best_len]` read would run past `end`
+        // (== total_size on the last block).
+        const int max_len = int(std::min<std::size_t>(
+            kMaxMatch, end - i));
         while (chain_pos >= int(min_pos) && chain_steps-- > 0) {
+            if (best_len >= max_len) break;
             // Quick pre-check — match must extend at least one
             // byte beyond the current best, so compare the byte
             // at position best_len first.
@@ -624,8 +632,6 @@ void Lz77(const std::uint8_t* data,
             // currently doesn't track partial-block consumption,
             // so we cap conservatively here.
             int len = 0;
-            const int max_len = int(std::min<std::size_t>(
-                kMaxMatch, end - i));
             while (len < max_len &&
                    data[chain_pos + len] == data[i + len]) {
                 ++len;

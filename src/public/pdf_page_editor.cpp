@@ -11,7 +11,10 @@ PdfPageEditor::PdfPageEditor(Aspose::Pdf::Document& document) {
     BindPdf(document);
 }
 
-void PdfPageEditor::MovePosition(float, float) {}
+void PdfPageEditor::MovePosition(float offsetX, float offsetY) {
+    move_x_ = offsetX;
+    move_y_ = offsetY;
+}
 
 int PdfPageEditor::GetPages() {
     return document_ == nullptr
@@ -66,6 +69,13 @@ void PdfPageEditor::ApplyChanges() {
         }
         if (page_size_.Width() > 0 && page_size_.Height() > 0) {
             page.SetPageSize(page_size_.Width(), page_size_.Height());
+        }
+        if (move_x_ != 0.0f || move_y_ != 0.0f) {
+            // Translate the page content by the staged offset (a
+            // `q 1 0 0 1 dx dy cm ... Q` wrapper flushed at Save).
+            document_->TransformPageContent(
+                static_cast<std::size_t>(pNum - 1), 1.0, 1.0,
+                static_cast<double>(move_x_), static_cast<double>(move_y_));
         }
     }
 }

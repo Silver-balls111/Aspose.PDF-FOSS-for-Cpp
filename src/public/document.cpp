@@ -1505,6 +1505,10 @@ void Document::Save(const std::string& outputFileName) const {
                   form_->flatten_requested_);
     const bool text_edits_dirty = !pending_text_edits_.empty();
     const bool redactions_dirty = !pending_redactions_.empty();
+    const bool page_transforms_dirty =
+        page_transforms_dirty_ && !pending_page_transforms_.empty();
+    const bool flatten_dirty =
+        flatten_dirty_ && !pending_flatten_contents_.empty();
     // Sync the public outline tree (if it was accessed) into the staged-write
     // form so AppendOutlinesUpdate persists it. Takes precedence over the
     // PdfBookmarkEditor staging path.
@@ -1521,7 +1525,8 @@ void Document::Save(const std::string& outputFileName) const {
         && !named_dests_dirty && !page_labels_dirty && !acroform_dirty
         && !page_geom_dirty_ && !outlines_dirty_ && !encrypt_requested_
         && !text_edits_dirty && !optimize_requested_ && !paragraphs_dirty
-        && !images_dirty && !artifacts_dirty && !redactions_dirty) {
+        && !images_dirty && !artifacts_dirty && !redactions_dirty
+        && !page_transforms_dirty && !flatten_dirty) {
         WriteAll(outputFileName,
                  std::span<const std::byte>(bytes_.data(), bytes_.size()));
         return;
@@ -1565,6 +1570,13 @@ void Document::Save(const std::string& outputFileName) const {
         working = AppendAnnotationsUpdate(working);
     }
 
+    if (flatten_dirty) {
+        // Runs after AppendAnnotationsUpdate: the burn pass drops the
+        // /Annots refs of the annotations it flattened, so it must see
+        // the already-rewritten /Annots array.
+        working = AppendFlattenUpdate(working);
+    }
+
     if (embedded_dirty) {
         working = AppendEmbeddedFilesUpdate(working);
     }
@@ -1603,6 +1615,10 @@ void Document::Save(const std::string& outputFileName) const {
 
     if (page_geom_dirty_) {
         working = AppendPageGeometryUpdate(working);
+    }
+
+    if (page_transforms_dirty) {
+        working = AppendPageTransformsUpdate(working);
     }
 
     if (outlines_dirty_) {
@@ -2062,6 +2078,172 @@ namespace {
 foundation::objects::Value PageNameValue(const char* name);
 }  // namespace
 
+// Build the /AP /N appearance operator text for an annotation. This is the
+// single source of the per-type appearance recipes: AppendAnnotationsUpdate
+// wraps the result in a Form XObject for a live annotation, and
+// FlattenPageAnnotations burns it into the page as a static Form when the
+// annotation is removed. Content operators are authored in absolute page
+// coordinates with /BBox equal to the annotation /Rect, so an identity `cm`
+// placement renders the form in place.
+bool Document::BuildAnnotationAppearance(
+        const Aspose::Pdf::Annotations::Annotation& a,
+        std::string& outContent, bool& needFont, bool& needExtGState,
+        double& outR, double& outG, double& outB) const {
+    namespace AN = Aspose::Pdf::Annotations;
+    const AN::AnnotationType t = a.AnnotationType();
+    const auto& r = a.Rect();
+    const double llx = r.LLX(), lly = r.LLY();
+    const double urx = r.URX(), ury = r.URY();
+    const double w = urx - llx, h = ury - lly;
+
+    std::ostringstream cs;
+    // Stroke/fill colour: the annotation's authored Color when set
+    // (alpha > 0), else a per-type default.
+    const Aspose::Pdf::Color ac = a.Color();
+    const bool has_c = ac.A() > 0.0;
+    double cr = 1.0, cg = 0.0, cb = 0.0;  // default red
+    auto use_color = [&](double dr, double dg, double db) {
+        if (has_c) { cr = ac.r_; cg = ac.g_; cb = ac.b_; }
+        else { cr = dr; cg = dg; cb = db; }
+    };
+    auto rgb = [](double a1, double b1, double c1) {
+        std::ostringstream o; o << a1 << ' ' << b1 << ' ' << c1;
+        return o.str();
+    };
+    auto esc = [&](const std::string& s) {
+        for (char c : s) {
+            if (c == '(' || c == ')' || c == '\\') cs << '\\';
+            cs << c;
+        }
+    };
+    auto bezier_ellipse = [&](double cx, double cy, double rx,
+                              double ry) {
+        const double k = 0.5523;
+        cs << cx << ' ' << (cy + ry) << " m "
+           << (cx + k * rx) << ' ' << (cy + ry) << ' '
+           << (cx + rx) << ' ' << (cy + k * ry) << ' '
+           << (cx + rx) << ' ' << cy << " c "
+           << (cx + rx) << ' ' << (cy - k * ry) << ' '
+           << (cx + k * rx) << ' ' << (cy - ry) << ' '
+           << cx << ' ' << (cy - ry) << " c "
+           << (cx - k * rx) << ' ' << (cy - ry) << ' '
+           << (cx - rx) << ' ' << (cy - k * ry) << ' '
+           << (cx - rx) << ' ' << cy << " c "
+           << (cx - rx) << ' ' << (cy + k * ry) << ' '
+           << (cx - k * rx) << ' ' << (cy + ry) << ' '
+           << cx << ' ' << (cy + ry) << " c ";
+    };
+
+    bool has_ap = true;
+    needFont = false;
+    needExtGState = false;
+    switch (t) {
+        case AN::AnnotationType::Highlight:
+            use_color(1, 1, 0); needExtGState = true;
+            cs << "q /GS0 gs " << rgb(cr, cg, cb) << " rg " << llx
+               << ' ' << lly << ' ' << w << ' ' << h << " re f Q\n";
+            break;
+        case AN::AnnotationType::Underline:
+        case AN::AnnotationType::Squiggly:
+            use_color(0, 0, 1);
+            cs << "q " << rgb(cr, cg, cb) << " rg " << llx << ' '
+               << lly << ' ' << w << " 1.5 re f Q\n";
+            break;
+        case AN::AnnotationType::StrikeOut:
+            use_color(1, 0, 0);
+            cs << "q " << rgb(cr, cg, cb) << " rg " << llx << ' '
+               << (lly + h * 0.5) << ' ' << w << " 1.5 re f Q\n";
+            break;
+        case AN::AnnotationType::Square:
+            use_color(1, 0, 0);
+            cs << "q 1 1 0.6 rg " << rgb(cr, cg, cb) << " RG 1.5 w "
+               << (llx + 1) << ' ' << (lly + 1) << ' ' << (w - 2)
+               << ' ' << (h - 2) << " re B Q\n";  // fill + stroke
+            break;
+        case AN::AnnotationType::Circle:
+            use_color(0, 0.6, 0);
+            cs << "q " << rgb(cr, cg, cb) << " RG 1.5 w [3 3] 0 d ";
+            bezier_ellipse((llx + urx) / 2, (lly + ury) / 2,
+                           w / 2 - 1, h / 2 - 1);
+            cs << "S Q\n";  // dashed, no fill
+            break;
+        case AN::AnnotationType::Line:
+            if (auto* la = dynamic_cast<const AN::LineAnnotation*>(&a)) {
+                use_color(0, 0, 1);
+                const auto& s = la->Starting();
+                const auto& e = la->Ending();
+                const double dx = e.X() - s.X(), dy = e.Y() - s.Y();
+                const double len = std::max(
+                    1e-3, std::sqrt(dx * dx + dy * dy));
+                const double ux = dx / len, uy = dy / len, az = 8.0;
+                auto head = [&](double px, double py, double vx,
+                                double vy) {
+                    cs << (px + (vx * 0.866 - vy * 0.5) * az) << ' '
+                       << (py + (vy * 0.866 + vx * 0.5) * az)
+                       << " m " << px << ' ' << py << " l "
+                       << (px + (vx * 0.866 + vy * 0.5) * az) << ' '
+                       << (py + (vy * 0.866 - vx * 0.5) * az)
+                       << " l S\n";
+                };
+                cs << "q " << rgb(cr, cg, cb) << " RG 1.5 w "
+                   << s.X() << ' ' << s.Y() << " m " << e.X() << ' '
+                   << e.Y() << " l S\n";
+                head(s.X(), s.Y(), ux, uy);
+                head(e.X(), e.Y(), -ux, -uy);
+                cs << "Q\n";
+            } else has_ap = false;
+            break;
+        case AN::AnnotationType::Ink:
+            if (auto* ia = dynamic_cast<const AN::InkAnnotation*>(&a)) {
+                use_color(0.6, 0, 0.6);
+                const auto& strokes = ia->InkList();
+                cs << "q " << rgb(cr, cg, cb) << " RG 1.5 w ";
+                for (const auto& st : strokes) {
+                    for (std::size_t i = 0; i < st.size(); ++i) {
+                        cs << st[i].X() << ' ' << st[i].Y()
+                           << (i == 0 ? " m " : " l ");
+                    }
+                }
+                cs << "S Q\n";
+            } else has_ap = false;
+            break;
+        case AN::AnnotationType::FreeText:
+            use_color(0, 0, 0); needFont = true;
+            cs << "q 1 1 0.7 rg " << llx << ' ' << lly << ' ' << w
+               << ' ' << h << " re f 0 0 0 RG 1 w " << (llx + 0.5)
+               << ' ' << (lly + 0.5) << ' ' << (w - 1) << ' '
+               << (h - 1) << " re S " << rgb(cr, cg, cb)
+               << " rg BT /Helv 11 Tf " << (llx + 6) << ' '
+               << (lly + h / 2 - 4) << " Td (";
+            esc(a.Contents());
+            cs << ") Tj ET Q\n";
+            break;
+        case AN::AnnotationType::Stamp: {
+            use_color(0, 0.5, 0); needFont = true;
+            const std::string label =
+                a.Contents().empty() ? "APPROVED" : a.Contents();
+            cs << "q " << rgb(cr, cg, cb) << " RG 2 w " << (llx + 1)
+               << ' ' << (lly + 1) << ' ' << (w - 2) << ' '
+               << (h - 2) << " re S " << rgb(cr, cg, cb)
+               << " rg BT /Helv " << (h * 0.42) << " Tf "
+               << (llx + w * 0.12) << ' ' << (lly + h * 0.32)
+               << " Td (";
+            esc(label);
+            cs << ") Tj ET Q\n";
+            break;
+        }
+        default:
+            has_ap = false;  // Text(sticky)/Link/FileAttachment
+            break;
+    }
+    if (!has_ap) return false;
+    outContent = cs.str();
+    outR = cr;
+    outG = cg;
+    outB = cb;
+    return true;
+}
+
 std::vector<std::byte> Document::AppendAnnotationsUpdate(
         const std::vector<std::byte>& working) const {
     auto working_span = std::span<const std::byte>(
@@ -2288,15 +2470,16 @@ std::vector<std::byte> Document::AppendAnnotationsUpdate(
             }
 
             // Subtype geometry + colour + a pre-rendered /AP appearance so the
-            // annotation paints in a viewer (conventional colours — the public
-            // Color type exposes no RGB getter to read the authored value).
+            // annotation paints in a viewer. The operator recipes live in
+            // BuildAnnotationAppearance (shared with the annotation-flatten
+            // path); this block only emits the subtype-specific dictionary
+            // entries (/QuadPoints /L /InkList) alongside them.
             {
                 namespace AN = Aspose::Pdf::Annotations;
                 const AN::AnnotationType t = ptr->AnnotationType();
                 const auto& r = ptr->Rect();
                 const double llx = r.LLX(), lly = r.LLY();
                 const double urx = r.URX(), ury = r.URY();
-                const double w = urx - llx, h = ury - lly;
                 auto push_num = [](foundation::objects::Array& a, double v) {
                     foundation::objects::Value x; x.v = v; a.items.push_back(std::move(x));
                 };
@@ -2304,169 +2487,57 @@ std::vector<std::byte> Document::AppendAnnotationsUpdate(
                     foundation::objects::Value v; v.v = std::move(a);
                     annot_dict->entries.emplace_back(key, std::move(v));
                 };
-                auto color_arr = [&](double cr, double cg, double cb) {
-                    foundation::objects::Array a; push_num(a, cr); push_num(a, cg);
-                    push_num(a, cb); return a;
-                };
-                auto quad = [&]() {
-                    foundation::objects::Array a;
-                    for (double v : {llx, ury, urx, ury, llx, lly, urx, lly})
-                        push_num(a, v);
-                    set_arr("QuadPoints", std::move(a));
-                };
-                std::ostringstream cs;
-                bool has_ap = true, need_font = false, need_extg = false;
-                // Stroke/fill colour: the annotation's authored Color when set
-                // (alpha > 0), else a per-type default.
-                const Aspose::Pdf::Color ac = ptr->Color();
-                const bool has_c = ac.A() > 0.0;
-                double cr = 1.0, cg = 0.0, cb = 0.0;  // default red
-                auto use_color = [&](double dr, double dg, double db) {
-                    if (has_c) { cr = ac.r_; cg = ac.g_; cb = ac.b_; }
-                    else { cr = dr; cg = dg; cb = db; }
-                };
-                auto rgb = [](double a, double b, double c) {
-                    std::ostringstream o; o << a << ' ' << b << ' ' << c;
-                    return o.str();
-                };
-                auto esc = [&](const std::string& s) {
-                    for (char c : s) {
-                        if (c == '(' || c == ')' || c == '\\') cs << '\\';
-                        cs << c;
-                    }
-                };
-                auto bezier_ellipse = [&](double cx, double cy, double rx,
-                                          double ry) {
-                    const double k = 0.5523;
-                    cs << cx << ' ' << (cy + ry) << " m "
-                       << (cx + k * rx) << ' ' << (cy + ry) << ' '
-                       << (cx + rx) << ' ' << (cy + k * ry) << ' '
-                       << (cx + rx) << ' ' << cy << " c "
-                       << (cx + rx) << ' ' << (cy - k * ry) << ' '
-                       << (cx + k * rx) << ' ' << (cy - ry) << ' '
-                       << cx << ' ' << (cy - ry) << " c "
-                       << (cx - k * rx) << ' ' << (cy - ry) << ' '
-                       << (cx - rx) << ' ' << (cy - k * ry) << ' '
-                       << (cx - rx) << ' ' << cy << " c "
-                       << (cx - rx) << ' ' << (cy + k * ry) << ' '
-                       << (cx - k * rx) << ' ' << (cy + ry) << ' '
-                       << cx << ' ' << (cy + ry) << " c ";
-                };
                 switch (t) {
                     case AN::AnnotationType::Highlight:
-                        use_color(1, 1, 0); need_extg = true; quad();
-                        cs << "q /GS0 gs " << rgb(cr, cg, cb) << " rg " << llx
-                           << ' ' << lly << ' ' << w << ' ' << h << " re f Q\n";
-                        break;
                     case AN::AnnotationType::Underline:
                     case AN::AnnotationType::Squiggly:
-                        use_color(0, 0, 1); quad();
-                        cs << "q " << rgb(cr, cg, cb) << " rg " << llx << ' '
-                           << lly << ' ' << w << " 1.5 re f Q\n";
+                    case AN::AnnotationType::StrikeOut: {
+                        foundation::objects::Array a;
+                        for (double v : {llx, ury, urx, ury, llx, lly, urx, lly})
+                            push_num(a, v);
+                        set_arr("QuadPoints", std::move(a));
                         break;
-                    case AN::AnnotationType::StrikeOut:
-                        use_color(1, 0, 0); quad();
-                        cs << "q " << rgb(cr, cg, cb) << " rg " << llx << ' '
-                           << (lly + h * 0.5) << ' ' << w << " 1.5 re f Q\n";
-                        break;
-                    case AN::AnnotationType::Square:
-                        use_color(1, 0, 0);
-                        cs << "q 1 1 0.6 rg " << rgb(cr, cg, cb) << " RG 1.5 w "
-                           << (llx + 1) << ' ' << (lly + 1) << ' ' << (w - 2)
-                           << ' ' << (h - 2) << " re B Q\n";  // fill + stroke
-                        break;
-                    case AN::AnnotationType::Circle:
-                        use_color(0, 0.6, 0);
-                        cs << "q " << rgb(cr, cg, cb) << " RG 1.5 w [3 3] 0 d ";
-                        bezier_ellipse((llx + urx) / 2, (lly + ury) / 2,
-                                       w / 2 - 1, h / 2 - 1);
-                        cs << "S Q\n";  // dashed, no fill
-                        break;
+                    }
                     case AN::AnnotationType::Line:
                         if (auto* la = dynamic_cast<const AN::LineAnnotation*>(ptr)) {
-                            use_color(0, 0, 1);
-                            const auto& s = la->Starting();
-                            const auto& e = la->Ending();
                             foundation::objects::Array a;
-                            push_num(a, s.X()); push_num(a, s.Y());
-                            push_num(a, e.X()); push_num(a, e.Y());
+                            push_num(a, la->Starting().X());
+                            push_num(a, la->Starting().Y());
+                            push_num(a, la->Ending().X());
+                            push_num(a, la->Ending().Y());
                             set_arr("L", std::move(a));
-                            const double dx = e.X() - s.X(), dy = e.Y() - s.Y();
-                            const double len = std::max(
-                                1e-3, std::sqrt(dx * dx + dy * dy));
-                            const double ux = dx / len, uy = dy / len, az = 8.0;
-                            auto head = [&](double px, double py, double vx,
-                                            double vy) {
-                                cs << (px + (vx * 0.866 - vy * 0.5) * az) << ' '
-                                   << (py + (vy * 0.866 + vx * 0.5) * az)
-                                   << " m " << px << ' ' << py << " l "
-                                   << (px + (vx * 0.866 + vy * 0.5) * az) << ' '
-                                   << (py + (vy * 0.866 - vx * 0.5) * az)
-                                   << " l S\n";
-                            };
-                            cs << "q " << rgb(cr, cg, cb) << " RG 1.5 w "
-                               << s.X() << ' ' << s.Y() << " m " << e.X() << ' '
-                               << e.Y() << " l S\n";
-                            head(s.X(), s.Y(), ux, uy);
-                            head(e.X(), e.Y(), -ux, -uy);
-                            cs << "Q\n";
-                        } else has_ap = false;
+                        }
                         break;
                     case AN::AnnotationType::Ink:
                         if (auto* ia = dynamic_cast<const AN::InkAnnotation*>(ptr)) {
-                            use_color(0.6, 0, 0.6);
-                            const auto& strokes = ia->InkList();
                             foundation::objects::Array outer;
-                            cs << "q " << rgb(cr, cg, cb) << " RG 1.5 w ";
-                            for (const auto& st : strokes) {
+                            for (const auto& st : ia->InkList()) {
                                 foundation::objects::Array inner;
-                                for (std::size_t i = 0; i < st.size(); ++i) {
-                                    push_num(inner, st[i].X());
-                                    push_num(inner, st[i].Y());
-                                    cs << st[i].X() << ' ' << st[i].Y()
-                                       << (i == 0 ? " m " : " l ");
+                                for (const auto& pt : st) {
+                                    push_num(inner, pt.X());
+                                    push_num(inner, pt.Y());
                                 }
                                 foundation::objects::Value iv;
                                 iv.v = std::move(inner);
                                 outer.items.push_back(std::move(iv));
                             }
-                            cs << "S Q\n";
                             set_arr("InkList", std::move(outer));
-                        } else has_ap = false;
+                        }
                         break;
-                    case AN::AnnotationType::FreeText:
-                        use_color(0, 0, 0); need_font = true;
-                        cs << "q 1 1 0.7 rg " << llx << ' ' << lly << ' ' << w
-                           << ' ' << h << " re f 0 0 0 RG 1 w " << (llx + 0.5)
-                           << ' ' << (lly + 0.5) << ' ' << (w - 1) << ' '
-                           << (h - 1) << " re S " << rgb(cr, cg, cb)
-                           << " rg BT /Helv 11 Tf " << (llx + 6) << ' '
-                           << (lly + h / 2 - 4) << " Td (";
-                        esc(ptr->Contents());
-                        cs << ") Tj ET Q\n";
-                        break;
-                    case AN::AnnotationType::Stamp: {
-                        use_color(0, 0.5, 0); need_font = true;
-                        const std::string label =
-                            ptr->Contents().empty() ? "APPROVED" : ptr->Contents();
-                        cs << "q " << rgb(cr, cg, cb) << " RG 2 w " << (llx + 1)
-                           << ' ' << (lly + 1) << ' ' << (w - 2) << ' '
-                           << (h - 2) << " re S " << rgb(cr, cg, cb)
-                           << " rg BT /Helv " << (h * 0.42) << " Tf "
-                           << (llx + w * 0.12) << ' ' << (lly + h * 0.32)
-                           << " Td (";
-                        esc(label);
-                        cs << ") Tj ET Q\n";
-                        break;
-                    }
                     default:
-                        has_ap = false;  // Text(sticky)/Link/FileAttachment
                         break;
                 }
+                double cr = 1.0, cg = 0.0, cb = 0.0;
+                bool need_font = false, need_extg = false;
+                std::string content;
+                const bool has_ap = BuildAnnotationAppearance(
+                    *ptr, content, need_font, need_extg, cr, cg, cb);
                 if (has_ap) {
-                    set_arr("C", color_arr(cr, cg, cb));
+                    foundation::objects::Array carr;
+                    for (double v : {cr, cg, cb}) push_num(carr, v);
+                    set_arr("C", std::move(carr));
                     const std::uint32_t apid = emit_annot_ap(
-                        llx, lly, urx, ury, cs.str(), need_font, need_extg);
+                        llx, lly, urx, ury, content, need_font, need_extg);
                     foundation::objects::Dict apd;
                     foundation::objects::Value nref;
                     nref.v = foundation::objects::Ref{apid, 0};
@@ -4492,6 +4563,761 @@ int Document::ReplaceTextInContent(const std::string& src,
     return total;
 }
 
+// ===== Page content transforms + annotation flattening (staged) ==============
+
+void Document::TransformPageContent(std::size_t leafIndex, double sx,
+                                    double sy, double dx, double dy,
+                                    const Aspose::Pdf::Rectangle* clip) {
+    if (!tree_ || leafIndex >= tree_->leaves.size()) return;
+    if (clip == nullptr) {
+        for (auto& t : pending_page_transforms_) {
+            if (t.leaf != leafIndex || t.has_clip) continue;
+            // Compose: existing transform first, then the new one —
+            // x' = sx·(t.sx·x + t.dx) + dx.
+            const double nsx = sx * t.sx;
+            const double nsy = sy * t.sy;
+            const double ndx = sx * t.dx + dx;
+            const double ndy = sy * t.dy + dy;
+            t.sx = nsx;
+            t.sy = nsy;
+            t.dx = ndx;
+            t.dy = ndy;
+            return;
+        }
+    }
+    PendingPageTransform nt;
+    nt.leaf = leafIndex;
+    nt.sx = sx;
+    nt.sy = sy;
+    nt.dx = dx;
+    nt.dy = dy;
+    if (clip != nullptr) {
+        nt.has_clip = true;
+        nt.cx0 = clip->LLX();
+        nt.cy0 = clip->LLY();
+        nt.cx1 = clip->URX();
+        nt.cy1 = clip->URY();
+    }
+    pending_page_transforms_.push_back(std::move(nt));
+    page_transforms_dirty_ = true;
+}
+
+std::vector<std::byte> Document::AppendPageTransformsUpdate(
+        const std::vector<std::byte>& working) const {
+    if (pending_page_transforms_.empty() || !tree_) return working;
+
+    auto working_span = std::span<const std::byte>(
+        working.data(), working.size());
+    foundation::trailer::Trailer trailer_bundle;
+    foundation::objects::Dump dump;
+    try {
+        trailer_bundle = foundation::trailer::Parse(working_span);
+        dump = foundation::objects::Parse(working_span);
+    } catch (const std::exception&) {
+        return working;
+    }
+    std::uint32_t next = trailer_bundle.size;
+    for (const auto& o : dump.objects) next = std::max(next, o.id + 1);
+
+    std::vector<foundation::pdf_writer_incremental::DirtyObject> dirty;
+    std::vector<std::vector<std::byte>> bodies;
+    auto push_op = [&](const std::string& ops) {
+        std::vector<std::byte>& b = bodies.emplace_back();
+        b.reserve(ops.size());
+        for (char c : ops) b.push_back(static_cast<std::byte>(c));
+        foundation::objects::Stream sv;
+        sv.body = std::span<const std::byte>(b.data(), b.size());
+        const std::uint32_t id = next++;
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = id;
+        d.generation = 0;
+        d.value.v = std::move(sv);
+        dirty.push_back(std::move(d));
+        return id;
+    };
+
+    // Group transforms by leaf, preserving call order (later calls wrap
+    // outside earlier ones).
+    std::map<std::size_t,
+             std::vector<const PendingPageTransform*>> by_leaf;
+    for (const auto& t : pending_page_transforms_)
+        by_leaf[t.leaf].push_back(&t);
+
+    for (const auto& [leaf, transforms] : by_leaf) {
+        if (leaf >= tree_->leaves.size()) continue;
+        const std::uint32_t page_id = tree_->leaves[leaf].id;
+        const auto* page_obj = FindPageObj(dump, page_id);
+        const auto* page_dict =
+            page_obj ? std::get_if<foundation::objects::Dict>(
+                           &page_obj->value.v)
+                     : nullptr;
+        if (page_dict == nullptr) continue;
+
+        // Existing /Contents (Ref or Array of Refs).
+        foundation::objects::Array contents;
+        bool has_contents = false;
+        for (const auto& kv : page_dict->entries) {
+            if (kv.first != "Contents") continue;
+            if (auto* arr =
+                    std::get_if<foundation::objects::Array>(&kv.second.v)) {
+                contents = *arr;
+                has_contents = true;
+            } else if (std::get_if<foundation::objects::Ref>(&kv.second.v)) {
+                contents.items.push_back(kv.second);
+                has_contents = true;
+            }
+        }
+        if (!has_contents || contents.items.empty()) continue;
+
+        // Nested wrappers: `W1 W2 … content … W2' W1'`.
+        foundation::objects::Array merged;
+        merged.items.reserve(contents.items.size() + 2 * transforms.size());
+        for (const auto* t : transforms) {
+            char buf[256];
+            if (t->has_clip) {
+                std::snprintf(buf, sizeof(buf),
+                              "q %.4f %.4f %.4f %.4f re W n "
+                              "%.6g 0 0 %.6g %.6g %.6g cm\n",
+                              t->cx0, t->cy0, t->cx1 - t->cx0,
+                              t->cy1 - t->cy0, t->sx, t->sy, t->dx, t->dy);
+            } else {
+                std::snprintf(buf, sizeof(buf),
+                              "q %.6g 0 0 %.6g %.6g %.6g cm\n",
+                              t->sx, t->sy, t->dx, t->dy);
+            }
+            foundation::objects::Value v;
+            v.v = foundation::objects::Ref{push_op(buf), 0};
+            merged.items.push_back(std::move(v));
+        }
+        for (const auto& it : contents.items) merged.items.push_back(it);
+        for (auto it = transforms.rbegin(); it != transforms.rend(); ++it) {
+            foundation::objects::Value v;
+            v.v = foundation::objects::Ref{push_op("Q\n"), 0};
+            merged.items.push_back(std::move(v));
+        }
+
+        foundation::objects::Dict updated = *page_dict;
+        for (auto it = updated.entries.begin();
+             it != updated.entries.end();) {
+            if (it->first == "Contents")
+                it = updated.entries.erase(it);
+            else
+                ++it;
+        }
+        {
+            foundation::objects::Value v;
+            v.v = std::move(merged);
+            updated.entries.emplace_back("Contents", std::move(v));
+        }
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = page_id;
+        d.generation = page_obj->generation;
+        d.value.v = std::move(updated);
+        dirty.push_back(std::move(d));
+    }
+
+    if (dirty.empty()) return working;
+    return foundation::pdf_writer_incremental::AppendIncremental(
+        working_span,
+        std::span<const foundation::pdf_writer_incremental::DirtyObject>(
+            dirty.data(), dirty.size()));
+}
+
+void Document::FlattenPageAnnotations(
+        std::size_t leafIndex,
+        const std::vector<Annotations::AnnotationType>* filterTypes,
+        bool applyRedactions) {
+    namespace AN = Aspose::Pdf::Annotations;
+    if (!tree_ || leafIndex >= tree_->leaves.size()) return;
+
+    auto span = std::span<const std::byte>(bytes_.data(), bytes_.size());
+    foundation::objects::Dump dump;
+    try {
+        dump = foundation::objects::Parse(span);
+    } catch (const std::exception&) {
+        return;
+    }
+
+    const std::uint32_t page_id = tree_->leaves[leafIndex].id;
+    const auto* page_obj = FindObject(dump, page_id);
+    const auto* page_dict =
+        page_obj ? std::get_if<foundation::objects::Dict>(&page_obj->value.v)
+                 : nullptr;
+    if (page_dict == nullptr) return;
+
+    auto as_num = [](const foundation::objects::Value* v, double def) {
+        if (v == nullptr) return def;
+        if (const auto* d = std::get_if<double>(&v->v)) return *d;
+        if (const auto* i = std::get_if<std::int64_t>(&v->v))
+            return static_cast<double>(*i);
+        return def;
+    };
+    auto matches = [&](AN::AnnotationType t) {
+        return filterTypes == nullptr || filterTypes->empty() ||
+               std::find(filterTypes->begin(), filterTypes->end(), t) !=
+                   filterTypes->end();
+    };
+    auto type_from_subtype =
+        [](const std::string& s) -> std::optional<AN::AnnotationType> {
+        // Reverse of PdfSubtypeName (annotation /Subtype → enum).
+        static const std::map<std::string, AN::AnnotationType> kMap = {
+            {"Text", AN::AnnotationType::Text},
+            {"Link", AN::AnnotationType::Link},
+            {"FreeText", AN::AnnotationType::FreeText},
+            {"Line", AN::AnnotationType::Line},
+            {"Square", AN::AnnotationType::Square},
+            {"Circle", AN::AnnotationType::Circle},
+            {"Polygon", AN::AnnotationType::Polygon},
+            {"PolyLine", AN::AnnotationType::PolyLine},
+            {"Highlight", AN::AnnotationType::Highlight},
+            {"Underline", AN::AnnotationType::Underline},
+            {"Squiggly", AN::AnnotationType::Squiggly},
+            {"StrikeOut", AN::AnnotationType::StrikeOut},
+            {"Stamp", AN::AnnotationType::Stamp},
+            {"Caret", AN::AnnotationType::Caret},
+            {"Ink", AN::AnnotationType::Ink},
+            {"Popup", AN::AnnotationType::Popup},
+            {"FileAttachment", AN::AnnotationType::FileAttachment},
+            {"Sound", AN::AnnotationType::Sound},
+            {"Movie", AN::AnnotationType::Movie},
+            {"Widget", AN::AnnotationType::Widget},
+            {"Screen", AN::AnnotationType::Screen},
+            {"Watermark", AN::AnnotationType::Watermark},
+            {"Redact", AN::AnnotationType::Redaction},
+        };
+        auto it = kMap.find(s);
+        if (it == kMap.end()) return std::nullopt;
+        return it->second;
+    };
+    auto read_rect = [&](const foundation::objects::Dict& d)
+        -> std::optional<std::array<double, 4>> {
+        const auto* rv = DictGet(d, "Rect");
+        if (rv == nullptr) return std::nullopt;
+        const auto* arr =
+            std::get_if<foundation::objects::Array>(&rv->v);
+        if (arr == nullptr || arr->items.size() != 4) return std::nullopt;
+        std::array<double, 4> r{as_num(&arr->items[0], 0.0),
+                                as_num(&arr->items[1], 0.0),
+                                as_num(&arr->items[2], 0.0),
+                                as_num(&arr->items[3], 0.0)};
+        if (r[2] < r[0]) std::swap(r[0], r[2]);
+        if (r[3] < r[1]) std::swap(r[1], r[3]);
+        return r;
+    };
+    // Resolve an annotation's /AP /N to the appearance stream object id
+    // (direct ref, or a sub-dictionary keyed by the /AS state).
+    auto resolve_ap = [&](const foundation::objects::Dict& ad)
+        -> std::uint32_t {
+        const auto* ap_v = DictGet(ad, "AP");
+        if (ap_v == nullptr) return 0;
+        const foundation::objects::Dict* apd = nullptr;
+        if (const auto* d = std::get_if<foundation::objects::Dict>(&ap_v->v))
+            apd = d;
+        else if (const auto* rf =
+                     std::get_if<foundation::objects::Ref>(&ap_v->v)) {
+            if (const auto* obj = FindObject(dump, rf->id))
+                apd = std::get_if<foundation::objects::Dict>(
+                    &obj->value.v);
+        }
+        if (apd == nullptr) return 0;
+        const auto* n_v = DictGet(*apd, "N");
+        if (n_v == nullptr) return 0;
+        std::uint32_t id = 0;
+        if (const auto* rf = std::get_if<foundation::objects::Ref>(&n_v->v)) {
+            id = rf->id;
+        } else if (const auto* nd =
+                       std::get_if<foundation::objects::Dict>(&n_v->v)) {
+            std::string state;
+            if (const auto* asv = DictGet(ad, "AS"))
+                if (const auto* s = std::get_if<std::string>(&asv->v))
+                    state = *s;
+            if (state.empty()) return 0;
+            const auto* sv = DictGet(*nd, state);
+            if (sv != nullptr)
+                if (const auto* rf =
+                        std::get_if<foundation::objects::Ref>(&sv->v))
+                    id = rf->id;
+        }
+        if (id == 0) return 0;
+        const auto* obj = FindObject(dump, id);
+        if (obj == nullptr ||
+            !std::get_if<foundation::objects::Stream>(&obj->value.v))
+            return 0;
+        return id;
+    };
+
+    // Find or create the pending flatten entry for this leaf.
+    std::size_t pf_idx = pending_flatten_contents_.size();
+    for (std::size_t i = 0; i < pending_flatten_contents_.size(); ++i) {
+        if (pending_flatten_contents_[i].leaf == leafIndex) {
+            pf_idx = i;
+            break;
+        }
+    }
+    if (pf_idx == pending_flatten_contents_.size()) {
+        pending_flatten_contents_.emplace_back();
+        pending_flatten_contents_.back().leaf = leafIndex;
+        pf_idx = pending_flatten_contents_.size() - 1;
+    }
+    auto& pf = pending_flatten_contents_[pf_idx];
+
+    // ---- COS pass: annotations persisted in the page /Annots ----------------
+    if (const auto* annots_v = DictGet(*page_dict, "Annots")) {
+        const foundation::objects::Array* annots_arr = nullptr;
+        if (const auto* arr =
+                std::get_if<foundation::objects::Array>(&annots_v->v))
+            annots_arr = arr;
+        else if (const auto* rf =
+                     std::get_if<foundation::objects::Ref>(&annots_v->v)) {
+            if (const auto* obj = FindObject(dump, rf->id))
+                annots_arr = std::get_if<foundation::objects::Array>(
+                    &obj->value.v);
+        }
+        if (annots_arr != nullptr) {
+            for (const auto& item : annots_arr->items) {
+                const auto* ref =
+                    std::get_if<foundation::objects::Ref>(&item.v);
+                if (ref == nullptr) continue;
+                const auto* aobj = FindObject(dump, ref->id);
+                const auto* ad =
+                    aobj ? std::get_if<foundation::objects::Dict>(
+                               &aobj->value.v)
+                         : nullptr;
+                if (ad == nullptr) continue;
+                std::string subtype;
+                if (const auto* sv = DictGet(*ad, "Subtype"))
+                    if (const auto* s = std::get_if<std::string>(&sv->v))
+                        subtype = *s;
+                const auto topt = type_from_subtype(subtype);
+                if (!topt || !matches(*topt)) continue;
+
+                pf.drop_annot_ids.push_back(ref->id);
+
+                if (applyRedactions &&
+                    *topt == AN::AnnotationType::Redaction) {
+                    if (const auto rr = read_rect(*ad)) {
+                        PendingRedaction pr;
+                        pr.leaf = leafIndex;
+                        pr.llx = (*rr)[0];
+                        pr.lly = (*rr)[1];
+                        pr.urx = (*rr)[2];
+                        pr.ury = (*rr)[3];
+                        pending_redactions_.push_back(std::move(pr));
+                    }
+                    continue;
+                }
+
+                // Hidden annotations paint nothing — drop without burning
+                // (mirrors the renderer's /F flag check).
+                bool hidden = false;
+                if (const auto* fv = DictGet(*ad, "F")) {
+                    hidden = (static_cast<long>(as_num(fv, 0.0)) & 0x2) != 0;
+                }
+                if (hidden) continue;
+
+                const std::uint32_t ap_id = resolve_ap(*ad);
+                if (ap_id == 0) continue;
+                const auto* ap_obj = FindObject(dump, ap_id);
+                const auto* ap_stream =
+                    ap_obj ? std::get_if<foundation::objects::Stream>(
+                                 &ap_obj->value.v)
+                           : nullptr;
+                if (ap_stream == nullptr) continue;
+
+                // §12.5.5: map the /Matrix-transformed appearance /BBox
+                // onto /Rect via an axis-aligned scale+translate (same
+                // math the renderer uses to paint annotations).
+                double sxv = 1.0, syv = 1.0, txv = 0.0, tyv = 0.0;
+                const auto rr = read_rect(*ad);
+                const auto* bv = DictGet(ap_stream->header, "BBox");
+                const auto* barr =
+                    bv ? std::get_if<foundation::objects::Array>(&bv->v)
+                       : nullptr;
+                if (rr && barr != nullptr && barr->items.size() == 4) {
+                    double m[6] = {1.0, 0.0, 0.0, 1.0, 0.0, 0.0};
+                    if (const auto* mv =
+                            DictGet(ap_stream->header, "Matrix")) {
+                        if (const auto* marr = std::get_if<
+                                foundation::objects::Array>(&mv->v)) {
+                            if (marr->items.size() == 6) {
+                                for (int k = 0; k < 6; ++k)
+                                    m[k] = as_num(&marr->items[k], 0.0);
+                            }
+                        }
+                    }
+                    const double bx[4] = {as_num(&barr->items[0], 0.0),
+                                          as_num(&barr->items[1], 0.0),
+                                          as_num(&barr->items[2], 0.0),
+                                          as_num(&barr->items[3], 0.0)};
+                    double tminx = 1e30, tminy = 1e30;
+                    double tmaxx = -1e30, tmaxy = -1e30;
+                    for (const auto [px, py] :
+                         {std::pair{bx[0], bx[1]}, {bx[2], bx[1]},
+                          {bx[2], bx[3]}, {bx[0], bx[3]}}) {
+                        const double qx = m[0] * px + m[2] * py + m[4];
+                        const double qy = m[1] * px + m[3] * py + m[5];
+                        tminx = std::min(tminx, qx);
+                        tmaxx = std::max(tmaxx, qx);
+                        tminy = std::min(tminy, qy);
+                        tmaxy = std::max(tmaxy, qy);
+                    }
+                    const double tw = tmaxx - tminx;
+                    const double th = tmaxy - tminy;
+                    sxv = (std::abs(tw) > 1e-9)
+                              ? ((*rr)[2] - (*rr)[0]) / tw
+                              : 1.0;
+                    syv = (std::abs(th) > 1e-9)
+                              ? ((*rr)[3] - (*rr)[1]) / th
+                              : 1.0;
+                    txv = (*rr)[0] - sxv * tminx;
+                    tyv = (*rr)[1] - syv * tminy;
+                }
+
+                char op[192];
+                std::snprintf(op, sizeof(op),
+                              "q %.4f 0 0 %.4f %.4f %.4f cm /Fla%u Do Q\n",
+                              sxv, syv, txv, tyv, ap_id);
+                pf.content += op;
+                pf.xobjects.emplace_back("Fla" + std::to_string(ap_id),
+                                         ap_id);
+            }
+        }
+    }
+
+    // ---- Collection pass: annotations not yet persisted ---------------------
+    if (leafIndex < page_annotations_.size() &&
+        page_annotations_[leafIndex] != nullptr) {
+        auto& coll = *page_annotations_[leafIndex];
+        for (int i = coll.Count() - 1; i >= 0; --i) {
+            const auto* ptr = &coll[i];
+            if (!matches(ptr->AnnotationType())) continue;
+            // Loaded annotations were already burned (or dropped) by the
+            // COS pass above — they only need removing from the collection
+            // so the save-time /Annots rewrite stays consistent.
+            if (coll.loaded_ids_.count(ptr) == 0) {
+                if (applyRedactions &&
+                    ptr->AnnotationType() == AN::AnnotationType::Redaction) {
+                    const auto& r = ptr->Rect();
+                    PendingRedaction pr;
+                    pr.leaf = leafIndex;
+                    pr.llx = std::min(r.LLX(), r.URX());
+                    pr.lly = std::min(r.LLY(), r.URY());
+                    pr.urx = std::max(r.LLX(), r.URX());
+                    pr.ury = std::max(r.LLY(), r.URY());
+                    pending_redactions_.push_back(std::move(pr));
+                } else {
+                    std::string content;
+                    bool need_font = false, need_extg = false;
+                    double cr = 0.0, cg = 0.0, cb = 0.0;
+                    if (BuildAnnotationAppearance(
+                            *ptr, content, need_font, need_extg, cr, cg,
+                            cb)) {
+                        PendingFlattenForm form;
+                        form.name =
+                            "FlaF" + std::to_string(flatten_seq_++);
+                        form.content = content;
+                        form.llx = ptr->Rect().LLX();
+                        form.lly = ptr->Rect().LLY();
+                        form.urx = ptr->Rect().URX();
+                        form.ury = ptr->Rect().URY();
+                        form.need_font = need_font;
+                        form.need_extgstate = need_extg;
+                        char op[128];
+                        std::snprintf(op, sizeof(op),
+                                      "q 1 0 0 1 0 0 cm /%s Do Q\n",
+                                      form.name.c_str());
+                        pf.content += op;
+                        pf.forms.push_back(std::move(form));
+                    }
+                }
+            }
+            coll.Delete(i);
+        }
+    }
+
+    if (pf.content.empty() && pf.forms.empty() && pf.xobjects.empty() &&
+        pf.drop_annot_ids.empty()) {
+        // Nothing to burn on this page — drop the empty entry.
+        pending_flatten_contents_.erase(
+            pending_flatten_contents_.begin() +
+            static_cast<std::ptrdiff_t>(pf_idx));
+        return;
+    }
+    flatten_dirty_ = true;
+}
+
+std::vector<std::byte> Document::AppendFlattenUpdate(
+        const std::vector<std::byte>& working) const {
+    if (pending_flatten_contents_.empty() || !tree_) return working;
+
+    auto working_span = std::span<const std::byte>(
+        working.data(), working.size());
+    foundation::trailer::Trailer trailer_bundle;
+    foundation::objects::Dump dump;
+    try {
+        trailer_bundle = foundation::trailer::Parse(working_span);
+        dump = foundation::objects::Parse(working_span);
+    } catch (const std::exception&) {
+        return working;
+    }
+    std::uint32_t next = trailer_bundle.size;
+    for (const auto& o : dump.objects) next = std::max(next, o.id + 1);
+
+    std::vector<foundation::pdf_writer_incremental::DirtyObject> dirty;
+    std::vector<std::vector<std::byte>> bodies;
+    auto push_bytes = [&](const std::string& src) {
+        std::vector<std::byte>& b = bodies.emplace_back();
+        b.reserve(src.size());
+        for (char c : src) b.push_back(static_cast<std::byte>(c));
+        foundation::objects::Stream sv;
+        sv.body = std::span<const std::byte>(b.data(), b.size());
+        const std::uint32_t id = next++;
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = id;
+        d.generation = 0;
+        d.value.v = std::move(sv);
+        dirty.push_back(std::move(d));
+        return id;
+    };
+    // Shared burn resources (allocated lazily, one per update).
+    std::uint32_t font_id = 0, extg_id = 0;
+    auto ensure_font = [&]() {
+        if (font_id != 0) return;
+        font_id = next++;
+        foundation::objects::Dict font;
+        font.entries.emplace_back("Type", PageNameValue("Font"));
+        font.entries.emplace_back("Subtype", PageNameValue("Type1"));
+        font.entries.emplace_back("BaseFont", PageNameValue("Helvetica"));
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = font_id;
+        d.generation = 0;
+        d.value.v = std::move(font);
+        dirty.push_back(std::move(d));
+    };
+    auto ensure_extg = [&]() {
+        if (extg_id != 0) return;
+        extg_id = next++;
+        foundation::objects::Dict gs;
+        gs.entries.emplace_back("Type", PageNameValue("ExtGState"));
+        gs.entries.emplace_back("BM", PageNameValue("Multiply"));
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = extg_id;
+        d.generation = 0;
+        d.value.v = std::move(gs);
+        dirty.push_back(std::move(d));
+    };
+
+    for (const auto& pf : pending_flatten_contents_) {
+        if (pf.leaf >= tree_->leaves.size()) continue;
+        const std::uint32_t page_id = tree_->leaves[pf.leaf].id;
+        const auto* page_obj = FindPageObj(dump, page_id);
+        const auto* page_dict =
+            page_obj ? std::get_if<foundation::objects::Dict>(
+                           &page_obj->value.v)
+                     : nullptr;
+        if (page_dict == nullptr) continue;
+        foundation::objects::Dict updated = *page_dict;
+
+        // (1) Emit the in-memory appearance forms.
+        std::map<std::string, std::uint32_t> form_ids;
+        for (const auto& form : pf.forms) {
+            foundation::objects::Dict resources;
+            if (form.need_font) {
+                ensure_font();
+                foundation::objects::Dict fonts;
+                foundation::objects::Value fv;
+                fv.v = foundation::objects::Ref{font_id, 0};
+                fonts.entries.emplace_back("Helv", std::move(fv));
+                foundation::objects::Value fv2;
+                fv2.v = std::move(fonts);
+                resources.entries.emplace_back("Font", std::move(fv2));
+            }
+            if (form.need_extgstate) {
+                ensure_extg();
+                foundation::objects::Dict ext;
+                foundation::objects::Value gv;
+                gv.v = foundation::objects::Ref{extg_id, 0};
+                ext.entries.emplace_back("GS0", std::move(gv));
+                foundation::objects::Value gv2;
+                gv2.v = std::move(ext);
+                resources.entries.emplace_back("ExtGState", std::move(gv2));
+            }
+            foundation::objects::Array bbox;
+            for (double dv : {form.llx, form.lly, form.urx, form.ury}) {
+                foundation::objects::Value v;
+                v.v = dv;
+                bbox.items.push_back(std::move(v));
+            }
+            foundation::objects::Dict header;
+            header.entries.emplace_back("Type", PageNameValue("XObject"));
+            header.entries.emplace_back("Subtype", PageNameValue("Form"));
+            {
+                foundation::objects::Value v;
+                v.v = static_cast<std::int64_t>(1);
+                header.entries.emplace_back("FormType", std::move(v));
+            }
+            {
+                foundation::objects::Value v;
+                v.v = std::move(bbox);
+                header.entries.emplace_back("BBox", std::move(v));
+            }
+            {
+                foundation::objects::Value v;
+                v.v = std::move(resources);
+                header.entries.emplace_back("Resources", std::move(v));
+            }
+            // Park the body bytes first (Stream.body is a non-owning span).
+            std::vector<std::byte>& body = bodies.emplace_back();
+            body.reserve(form.content.size());
+            for (char c : form.content)
+                body.push_back(static_cast<std::byte>(c));
+            foundation::objects::Stream st;
+            st.header = std::move(header);
+            st.body = std::span<const std::byte>(body.data(), body.size());
+            const std::uint32_t id = next++;
+            foundation::pdf_writer_incremental::DirtyObject d;
+            d.id = id;
+            d.generation = 0;
+            d.value.v = std::move(st);
+            dirty.push_back(std::move(d));
+            form_ids[form.name] = id;
+        }
+
+        // (2) The burn stream — drawn last so it paints on top.
+        std::uint32_t burn_id = 0;
+        if (!pf.content.empty()) burn_id = push_bytes(pf.content);
+
+        // (3a) /Contents append.
+        if (burn_id != 0) {
+            foundation::objects::Array contents;
+            for (const auto& kv : page_dict->entries) {
+                if (kv.first != "Contents") continue;
+                if (auto* arr = std::get_if<foundation::objects::Array>(
+                        &kv.second.v))
+                    contents = *arr;
+                else if (std::get_if<foundation::objects::Ref>(
+                             &kv.second.v))
+                    contents.items.push_back(kv.second);
+            }
+            {
+                foundation::objects::Value v;
+                v.v = foundation::objects::Ref{burn_id, 0};
+                contents.items.push_back(std::move(v));
+            }
+            for (auto it = updated.entries.begin();
+                 it != updated.entries.end();) {
+                if (it->first == "Contents")
+                    it = updated.entries.erase(it);
+                else
+                    ++it;
+            }
+            {
+                foundation::objects::Value v;
+                v.v = std::move(contents);
+                updated.entries.emplace_back("Contents", std::move(v));
+            }
+        }
+
+        // (3b) /Resources /XObject merge.
+        if (!pf.xobjects.empty() || !form_ids.empty()) {
+            foundation::objects::Dict resources;
+            for (const auto& kv : page_dict->entries)
+                if (kv.first == "Resources")
+                    resources = ResolveDictCopy(kv.second, dump);
+            foundation::objects::Dict xobjects;
+            for (const auto& kv : resources.entries)
+                if (kv.first == "XObject")
+                    xobjects = ResolveDictCopy(kv.second, dump);
+            for (const auto& [name, id] : pf.xobjects) {
+                foundation::objects::Value v;
+                v.v = foundation::objects::Ref{id, 0};
+                xobjects.entries.emplace_back(name, std::move(v));
+            }
+            for (const auto& [name, id] : form_ids) {
+                foundation::objects::Value v;
+                v.v = foundation::objects::Ref{id, 0};
+                xobjects.entries.emplace_back(name, std::move(v));
+            }
+            for (auto it = resources.entries.begin();
+                 it != resources.entries.end();) {
+                if (it->first == "XObject")
+                    it = resources.entries.erase(it);
+                else
+                    ++it;
+            }
+            {
+                foundation::objects::Value v;
+                v.v = std::move(xobjects);
+                resources.entries.emplace_back("XObject", std::move(v));
+            }
+            for (auto it = updated.entries.begin();
+                 it != updated.entries.end();) {
+                if (it->first == "Resources")
+                    it = updated.entries.erase(it);
+                else
+                    ++it;
+            }
+            {
+                foundation::objects::Value v;
+                v.v = std::move(resources);
+                updated.entries.emplace_back("Resources", std::move(v));
+            }
+        }
+
+        // (3c) Drop the /Annots refs of burned / deleted annotations.
+        if (!pf.drop_annot_ids.empty()) {
+            const std::set<std::uint32_t> drop(pf.drop_annot_ids.begin(),
+                                               pf.drop_annot_ids.end());
+            foundation::objects::Array filtered;
+            if (const auto* annots_v = DictGet(*page_dict, "Annots")) {
+                const foundation::objects::Array* annots_arr = nullptr;
+                if (const auto* arr = std::get_if<foundation::objects::Array>(
+                        &annots_v->v))
+                    annots_arr = arr;
+                else if (const auto* rf = std::get_if<
+                             foundation::objects::Ref>(&annots_v->v)) {
+                    if (const auto* obj = FindObject(dump, rf->id))
+                        annots_arr = std::get_if<foundation::objects::Array>(
+                            &obj->value.v);
+                }
+                if (annots_arr != nullptr) {
+                    for (const auto& item : annots_arr->items) {
+                        const auto* ref = std::get_if<
+                            foundation::objects::Ref>(&item.v);
+                        if (ref != nullptr && drop.count(ref->id) > 0)
+                            continue;
+                        filtered.items.push_back(item);
+                    }
+                }
+            }
+            for (auto it = updated.entries.begin();
+                 it != updated.entries.end();) {
+                if (it->first == "Annots")
+                    it = updated.entries.erase(it);
+                else
+                    ++it;
+            }
+            {
+                foundation::objects::Value v;
+                v.v = std::move(filtered);
+                updated.entries.emplace_back("Annots", std::move(v));
+            }
+        }
+
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = page_id;
+        d.generation = page_obj->generation;
+        d.value.v = std::move(updated);
+        dirty.push_back(std::move(d));
+    }
+
+    if (dirty.empty()) return working;
+    return foundation::pdf_writer_incremental::AppendIncremental(
+        working_span,
+        std::span<const foundation::pdf_writer_incremental::DirtyObject>(
+            dirty.data(), dirty.size()));
+}
+
 namespace {
 
 // 3x2 affine text matrix [a b c d e f].
@@ -5277,6 +6103,335 @@ bool Document::AddImageBytesToPage(std::size_t leaf,
     // any other page before this edit (e.g. drawing a footer after an
     // annotation was added drops the annotation).
     return true;
+}
+
+std::uint32_t Document::ImportPageAsForm(const Document& src,
+                                         int srcPage1Based,
+                                         double& outWidth,
+                                         double& outHeight) {
+    outWidth = 0.0;
+    outHeight = 0.0;
+    if (!tree_ || !src.tree_) {
+        throw std::runtime_error(
+            "Aspose::Pdf::Document::ImportPageAsForm: document is not "
+            "loaded");
+    }
+    if (srcPage1Based < 1 ||
+        static_cast<std::size_t>(srcPage1Based) > src.tree_->leaves.size()) {
+        throw std::runtime_error(
+            "Aspose::Pdf::Document::ImportPageAsForm: source page " +
+            std::to_string(srcPage1Based) + " out of range");
+    }
+
+    const std::size_t src_leaf = static_cast<std::size_t>(srcPage1Based - 1);
+    // Staged (unsaved) source geometry wins so a caller that resized the
+    // source page sees the resized footprint.
+    const Aspose::Pdf::Rectangle srect = src.GetPageRectInternal(src_leaf);
+    outWidth = srect.Width();
+    outHeight = srect.Height();
+    if (outWidth <= 0.0 || outHeight <= 0.0) {
+        throw std::runtime_error(
+            "Aspose::Pdf::Document::ImportPageAsForm: source page has no "
+            "usable geometry");
+    }
+
+    auto dspan = std::span<const std::byte>(bytes_.data(), bytes_.size());
+    auto dtrailer = foundation::trailer::Parse(dspan);
+    auto ddump = foundation::objects::Parse(dspan);
+    std::uint32_t next = dtrailer.size;
+    for (const auto& o : ddump.objects) next = std::max(next, o.id + 1);
+
+    auto sspan =
+        std::span<const std::byte>(src.bytes_.data(), src.bytes_.size());
+    foundation::objects::Dump sdump;
+    try {
+        sdump = foundation::objects::Parse(sspan);
+    } catch (const std::exception&) {
+        throw std::runtime_error(
+            "Aspose::Pdf::Document::ImportPageAsForm: source document "
+            "could not be parsed");
+    }
+    const std::uint32_t src_page_id = src.tree_->leaves[src_leaf].id;
+    const auto* spage_obj = FindPageObj(sdump, src_page_id);
+    const auto* spage_dict =
+        spage_obj ? std::get_if<foundation::objects::Dict>(
+                        &spage_obj->value.v)
+                  : nullptr;
+    if (spage_dict == nullptr) {
+        throw std::runtime_error(
+            "Aspose::Pdf::Document::ImportPageAsForm: source page object "
+            "not found");
+    }
+
+    // Body = the source page's content streams, decoded and concatenated.
+    std::vector<std::byte> body;
+    for (const auto& kv : spage_dict->entries) {
+        if (kv.first != "Contents") continue;
+        std::vector<std::uint32_t> stream_ids;
+        if (const auto* r = std::get_if<foundation::objects::Ref>(&kv.second.v)) {
+            stream_ids.push_back(r->id);
+        } else if (const auto* a =
+                       std::get_if<foundation::objects::Array>(&kv.second.v)) {
+            for (const auto& it : a->items)
+                if (const auto* rr =
+                        std::get_if<foundation::objects::Ref>(&it.v))
+                    stream_ids.push_back(rr->id);
+        }
+        for (std::uint32_t sid : stream_ids) {
+            const auto* obj = FindObject(sdump, sid);
+            const auto* st =
+                obj ? std::get_if<foundation::objects::Stream>(
+                          &obj->value.v)
+                    : nullptr;
+            if (st == nullptr) continue;
+            if (StreamIsFlate(st->header)) {
+                try {
+                    std::vector<std::byte> dec =
+                        foundation::flate::Decode(st->body);
+                    body.insert(body.end(), dec.begin(), dec.end());
+                    continue;
+                } catch (const std::exception&) {
+                    // fall through to the raw copy
+                }
+            }
+            body.insert(body.end(), st->body.begin(), st->body.end());
+        }
+    }
+
+    // Deep-copy the source page /Resources graph (BFS remap, the
+    // ImportPagesFrom pattern). Staged source annotations are not part of
+    // bytes_ and are therefore not imported — the form reflects the file
+    // as persisted.
+    const foundation::objects::Value* resources_val =
+        DictGet(*spage_dict, "Resources");
+    std::vector<std::uint32_t> order;
+    std::set<std::uint32_t> seen;
+    auto add = [&](std::uint32_t id) {
+        if (seen.insert(id).second) order.push_back(id);
+    };
+    if (resources_val != nullptr) {
+        std::vector<std::uint32_t> seed;
+        CollectRefs(*resources_val, seed);
+        for (std::uint32_t id : seed) add(id);
+        for (std::size_t i = 0; i < order.size(); ++i) {
+            const auto* obj = FindPageObj(sdump, order[i]);
+            if (obj == nullptr) continue;
+            std::vector<std::uint32_t> refs;
+            CollectRefs(obj->value, refs);
+            for (std::uint32_t r : refs) add(r);
+        }
+    }
+    std::map<std::uint32_t, std::uint32_t> remap;
+    for (std::uint32_t id : order) remap[id] = next++;
+
+    std::vector<foundation::pdf_writer_incremental::DirtyObject> dirty;
+    for (std::uint32_t id : order) {
+        const auto* obj = FindPageObj(sdump, id);
+        if (obj == nullptr) continue;
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = remap[id];
+        d.generation = 0;
+        d.value = RemapValue(obj->value, remap);
+        dirty.push_back(std::move(d));
+    }
+
+    // The Form XObject: /BBox is the source page box, content authored in
+    // page coordinates → identity /Matrix.
+    foundation::objects::Array bbox;
+    for (double dv : {0.0, 0.0, outWidth, outHeight}) {
+        foundation::objects::Value v;
+        v.v = dv;
+        bbox.items.push_back(std::move(v));
+    }
+    foundation::objects::Array matrix;
+    for (double dv : {1.0, 0.0, 0.0, 1.0, 0.0, 0.0}) {
+        foundation::objects::Value v;
+        v.v = dv;
+        matrix.items.push_back(std::move(v));
+    }
+    foundation::objects::Dict header;
+    header.entries.emplace_back("Type", PageNameValue("XObject"));
+    header.entries.emplace_back("Subtype", PageNameValue("Form"));
+    {
+        foundation::objects::Value v;
+        v.v = static_cast<std::int64_t>(1);
+        header.entries.emplace_back("FormType", std::move(v));
+    }
+    {
+        foundation::objects::Value v;
+        v.v = std::move(bbox);
+        header.entries.emplace_back("BBox", std::move(v));
+    }
+    {
+        foundation::objects::Value v;
+        v.v = std::move(matrix);
+        header.entries.emplace_back("Matrix", std::move(v));
+    }
+    if (resources_val != nullptr) {
+        foundation::objects::Value v = RemapValue(*resources_val, remap);
+        header.entries.emplace_back("Resources", std::move(v));
+    }
+    const std::uint32_t form_id = next++;
+    {
+        foundation::objects::Stream st;
+        st.header = std::move(header);
+        st.body = std::span<const std::byte>(body.data(), body.size());
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = form_id;
+        d.generation = 0;
+        d.value.v = std::move(st);
+        dirty.push_back(std::move(d));
+    }
+
+    bytes_ = foundation::pdf_writer_incremental::AppendIncremental(
+        dspan,
+        std::span<const foundation::pdf_writer_incremental::DirtyObject>(
+            dirty.data(), dirty.size()));
+    tree_ = std::make_unique<foundation::pages_tree::Tree>(
+        foundation::pages_tree::Parse(
+            std::span<const std::byte>(bytes_.data(), bytes_.size())));
+    // A content-object addition keeps the page-tree structure unchanged —
+    // staged per-leaf state stays correctly indexed (do not clear it).
+    return form_id;
+}
+
+void Document::DrawFormOnPage(std::size_t destLeaf, std::uint32_t formId,
+                              const std::string& formName, double sx,
+                              double sy, double dx, double dy,
+                              const Aspose::Pdf::Rectangle* clip) {
+    if (!tree_ || destLeaf >= tree_->leaves.size()) {
+        throw std::runtime_error(
+            "Aspose::Pdf::Document::DrawFormOnPage: destination page out "
+            "of range");
+    }
+
+    auto span = std::span<const std::byte>(bytes_.data(), bytes_.size());
+    auto trailer_bundle = foundation::trailer::Parse(span);
+    auto dump = foundation::objects::Parse(span);
+    std::uint32_t next = trailer_bundle.size;
+    for (const auto& o : dump.objects) next = std::max(next, o.id + 1);
+
+    // Content stream: q [<clip re W n>] sx 0 0 sy dx dy cm /Name Do Q.
+    char op[320];
+    if (clip != nullptr && !clip->IsEmpty()) {
+        std::snprintf(
+            op, sizeof(op),
+            "q %.4f %.4f %.4f %.4f re W n %.4f 0 0 %.4f %.4f %.4f cm "
+            "/%s Do Q\n",
+            clip->LLX(), clip->LLY(), clip->Width(), clip->Height(), sx, sy,
+            dx, dy, formName.c_str());
+    } else {
+        std::snprintf(op, sizeof(op),
+                      "q %.4f 0 0 %.4f %.4f %.4f cm /%s Do Q\n", sx, sy, dx,
+                      dy, formName.c_str());
+    }
+    std::vector<std::byte> content_bytes;
+    for (const char* p = op; *p; ++p)
+        content_bytes.push_back(static_cast<std::byte>(*p));
+
+    std::vector<foundation::pdf_writer_incremental::DirtyObject> dirty;
+    const std::uint32_t content_id = next++;
+    {
+        foundation::objects::Stream sv;
+        sv.body = std::span<const std::byte>(content_bytes.data(),
+                                             content_bytes.size());
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = content_id;
+        d.generation = 0;
+        d.value.v = std::move(sv);
+        dirty.push_back(std::move(d));
+    }
+
+    // Page dict update: /Contents append + /Resources /XObject merge.
+    const std::uint32_t page_id = tree_->leaves[destLeaf].id;
+    const auto* page_obj = FindPageObj(dump, page_id);
+    const auto* page_dict =
+        page_obj ? std::get_if<foundation::objects::Dict>(&page_obj->value.v)
+                 : nullptr;
+    if (page_dict == nullptr) {
+        throw std::runtime_error(
+            "Aspose::Pdf::Document::DrawFormOnPage: destination page "
+            "object not found");
+    }
+    foundation::objects::Dict updated = *page_dict;
+
+    foundation::objects::Array contents;
+    for (const auto& kv : page_dict->entries) {
+        if (kv.first != "Contents") continue;
+        if (auto* arr =
+                std::get_if<foundation::objects::Array>(&kv.second.v))
+            contents = *arr;
+        else if (std::get_if<foundation::objects::Ref>(&kv.second.v))
+            contents.items.push_back(kv.second);
+    }
+    {
+        foundation::objects::Value v;
+        v.v = foundation::objects::Ref{content_id, 0};
+        contents.items.push_back(std::move(v));
+    }
+    for (auto it = updated.entries.begin(); it != updated.entries.end();) {
+        if (it->first == "Contents")
+            it = updated.entries.erase(it);
+        else
+            ++it;
+    }
+    {
+        foundation::objects::Value v;
+        v.v = std::move(contents);
+        updated.entries.emplace_back("Contents", std::move(v));
+    }
+
+    foundation::objects::Dict resources;
+    for (const auto& kv : page_dict->entries)
+        if (kv.first == "Resources")
+            resources = ResolveDictCopy(kv.second, dump);
+    foundation::objects::Dict xobjects;
+    for (const auto& kv : resources.entries)
+        if (kv.first == "XObject")
+            xobjects = ResolveDictCopy(kv.second, dump);
+    {
+        foundation::objects::Value v;
+        v.v = foundation::objects::Ref{formId, 0};
+        xobjects.entries.emplace_back(formName, std::move(v));
+    }
+    for (auto it = resources.entries.begin();
+         it != resources.entries.end();) {
+        if (it->first == "XObject")
+            it = resources.entries.erase(it);
+        else
+            ++it;
+    }
+    {
+        foundation::objects::Value v;
+        v.v = std::move(xobjects);
+        resources.entries.emplace_back("XObject", std::move(v));
+    }
+    for (auto it = updated.entries.begin(); it != updated.entries.end();) {
+        if (it->first == "Resources")
+            it = updated.entries.erase(it);
+        else
+            ++it;
+    }
+    {
+        foundation::objects::Value v;
+        v.v = std::move(resources);
+        updated.entries.emplace_back("Resources", std::move(v));
+    }
+    {
+        foundation::pdf_writer_incremental::DirtyObject d;
+        d.id = page_id;
+        d.generation = page_obj->generation;
+        d.value.v = std::move(updated);
+        dirty.push_back(std::move(d));
+    }
+
+    bytes_ = foundation::pdf_writer_incremental::AppendIncremental(
+        span,
+        std::span<const foundation::pdf_writer_incremental::DirtyObject>(
+            dirty.data(), dirty.size()));
+    tree_ = std::make_unique<foundation::pages_tree::Tree>(
+        foundation::pages_tree::Parse(
+            std::span<const std::byte>(bytes_.data(), bytes_.size())));
 }
 
 bool Document::AddTextToPage(std::size_t leaf, const std::string& text,

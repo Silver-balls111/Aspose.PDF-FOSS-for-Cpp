@@ -14,10 +14,14 @@
 //   * Try* form (TryConcatenate, TryAppend, …) — returns bool
 //     and surfaces the exception through LastException.
 //
-// v1 baseline: every file-manipulation method is a stub that
-// returns false. The actual byte manipulation needs substantial
-// PdfWriter wiring that's deferred to a follow-on beat. Properties
-// + nested types are real storage.
+// v1 baseline: the file-manipulation methods are real — Concatenate /
+// Append / Insert / Extract / Delete / Split / MakeBooklet deep-import or
+// remove pages through Document's incremental writer, MakeNUp performs
+// real 2-up imposition (two source pages per sheet via Form XObjects),
+// ResizeContents / ResizeContentsPct / AddMargins / AddMarginsPct scale
+// and translate page content via a content-stream matrix wrapper, and
+// AddPageBreak splits pages at the requested y positions (clip-based).
+// Properties + nested types are real storage.
 //
 // Phased drops:
 //   * All Stream-based overloads (canonical pattern: every
@@ -365,6 +369,13 @@ private:
                             const std::vector<int>& pages,
                             const ContentsResizeParameters& parameters,
                             bool isTry);
+    // Shared N-up core. `pairwise` pairs page i of each input file onto
+    // one sheet (two-file overload); otherwise source pages are consumed
+    // sequentially, two per sheet, laid out side-by-side or (isSidewise)
+    // stacked vertically.
+    bool MakeNUpImpl(const std::vector<std::string>& inputFiles,
+                     const std::string& outputFile, bool pairwise,
+                     bool isSidewise, bool isTry);
 
     bool allow_concatenate_exceptions_ = false;
     bool close_concatenated_streams_ = false;

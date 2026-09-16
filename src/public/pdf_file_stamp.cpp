@@ -171,9 +171,18 @@ void PdfFileStamp::ConvertTo(Aspose::Pdf::PdfFormat value) noexcept {
     convert_to_ = value;
 }
 float PdfFileStamp::PageHeight() const noexcept {
-    return 792.0f;  // canonical US-Letter default (per-page geometry deferred)
+    // First page's real height (canonical Letter when unbound).
+    if (document_ == nullptr || document_->PageCountInternal() < 1)
+        return 792.0f;
+    return static_cast<float>(
+        document_->PageHeightInternal(static_cast<std::size_t>(0)));
 }
-float PdfFileStamp::PageWidth() const noexcept { return 612.0f; }
+float PdfFileStamp::PageWidth() const noexcept {
+    if (document_ == nullptr || document_->PageCountInternal() < 1)
+        return 612.0f;
+    return static_cast<float>(
+        document_->PageWidthInternal(static_cast<std::size_t>(0)));
+}
 int PdfFileStamp::StartingNumber() const noexcept { return starting_number_; }
 void PdfFileStamp::StartingNumber(int value) noexcept {
     starting_number_ = value;

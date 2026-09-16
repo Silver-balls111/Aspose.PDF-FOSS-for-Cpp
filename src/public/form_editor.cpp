@@ -421,6 +421,9 @@ void FormEditor::RenameField(const std::string& fieldName,
     }
 }
 
+// v1 stub — removing a field's /A action needs action storage on
+// WidgetAnnotation/Field, which v1 does not carry (like SetSubmitUrl /
+// SetFieldScript above).
 void FormEditor::RemoveFieldAction(const std::string& /*fieldName*/) {}
 
 void FormEditor::AddSubmitBtn(const std::string& fieldName, int pageNum,

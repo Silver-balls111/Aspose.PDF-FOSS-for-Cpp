@@ -32,6 +32,10 @@ std::string HelloWorldPdf() {
     return (FixtureRoot() / "hello_world.pdf").string();
 }
 
+std::string RedRectPdf() {
+    return (FixtureRoot() / "red_rect.pdf").string();
+}
+
 }  // namespace
 
 TEST(FacadesPdfFileInfoSmoke, DefaultsAndEnumValues) {
@@ -58,10 +62,24 @@ TEST(FacadesPdfFileInfoSmoke, BindByFileLoadsMetadata) {
     EXPECT_GT(info.NumberOfPages(), 0);
     EXPECT_EQ(info.GetPdfVersion(), "1.4");
 
-    // Page geometry stubs return canonical defaults.
+    // Real page geometry — hello_world.pdf is 612x792 with no /Rotate.
     EXPECT_FLOAT_EQ(info.GetPageWidth(1),     612.0f);
     EXPECT_FLOAT_EQ(info.GetPageHeight(1),    792.0f);
     EXPECT_FLOAT_EQ(info.GetPageRotation(1),   0.0f);
+    EXPECT_FLOAT_EQ(info.GetPageXOffset(1),    0.0f);
+    EXPECT_FLOAT_EQ(info.GetPageYOffset(1),    0.0f);
+    // Both password probes collapse to IsEncrypted() — the underlying
+    // Document exposes no user/owner distinction in v1.
+    EXPECT_FALSE(info.HasOpenPassword());
+    EXPECT_FALSE(info.HasEditPassword());
+}
+
+TEST(FacadesPdfFileInfoSmoke, PageGeometryReflectsRealMediaBox) {
+    // Non-Letter fixture: red_rect.pdf carries /MediaBox [0 0 100 100].
+    PdfFileInfo info{RedRectPdf()};
+    EXPECT_FLOAT_EQ(info.GetPageWidth(1),   100.0f);
+    EXPECT_FLOAT_EQ(info.GetPageHeight(1),  100.0f);
+    EXPECT_FLOAT_EQ(info.GetPageRotation(1), 0.0f);
 }
 
 TEST(FacadesPdfFileInfoSmoke, BindByDocumentAndInfoRoundtrip) {

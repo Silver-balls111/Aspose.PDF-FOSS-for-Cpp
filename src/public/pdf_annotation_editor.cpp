@@ -295,12 +295,27 @@ void PdfAnnotationEditor::ModifyAnnotationsAuthor(
 // ===== Flatten ===============================================================
 
 void PdfAnnotationEditor::FlatteningAnnotations() {
-    DeleteAnnotations();
+    if (document_ == nullptr) return;
+    const int count = static_cast<int>(document_->Pages().Count());
+    for (int p = 1; p <= count; ++p) {
+        document_->FlattenPageAnnotations(static_cast<std::size_t>(p - 1),
+                                          nullptr, false);
+    }
 }
+
 void PdfAnnotationEditor::FlatteningAnnotations(
     const Aspose::Pdf::Forms::Form::FlattenSettings&) {
-    DeleteAnnotations();
+    // v1: the settings toggles (UpdateAppearances, HideButtons, …) are
+    // ignored — every annotation is burned into the page content and
+    // removed, exactly like the no-argument overload.
+    if (document_ == nullptr) return;
+    const int count = static_cast<int>(document_->Pages().Count());
+    for (int p = 1; p <= count; ++p) {
+        document_->FlattenPageAnnotations(static_cast<std::size_t>(p - 1),
+                                          nullptr, false);
+    }
 }
+
 void PdfAnnotationEditor::FlatteningAnnotations(
     int start, int end,
     const std::vector<Aspose::Pdf::Annotations::AnnotationType>& annotType) {
@@ -310,16 +325,8 @@ void PdfAnnotationEditor::FlatteningAnnotations(
     int s = std::max(1, start);
     int e = (end <= 0 || end > count) ? count : end;
     for (int p = s; p <= e; ++p) {
-        auto& annots = pages[p].Annotations();
-        for (int i = annots.Count() - 1; i >= 0; --i) {
-            auto t = annots[i].AnnotationType();
-            for (auto target : annotType) {
-                if (t == target) {
-                    annots.Delete(i);
-                    break;
-                }
-            }
-        }
+        document_->FlattenPageAnnotations(static_cast<std::size_t>(p - 1),
+                                          &annotType, false);
     }
 }
 

@@ -9,7 +9,7 @@
 // page's content stream (via Document::ApplyTextStamps, an incremental
 // update) — the stamped text is present and extractable after Save.
 // Properties + the 8 position constants are real. PageHeight / PageWidth
-// return canonical defaults.
+// report the first page's real geometry.
 //
 // Phased drops:
 //   * Stream ctors / Save(Stream) / InputStream / OutputStream /
@@ -51,7 +51,7 @@ public:
     PdfFileStamp(Aspose::Pdf::Document& document,
                  const std::string& outputFile);
 
-    // ---- Stamping (v1 stubs) ----
+    // ---- Stamping (real) ----
 
     void AddPageNumber(const std::string& format);
     void AddPageNumber(const std::string& format, int startingNumber);

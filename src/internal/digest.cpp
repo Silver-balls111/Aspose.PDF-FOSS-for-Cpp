@@ -139,7 +139,7 @@ std::vector<std::byte> Md5Impl(std::span<const std::byte> data) {
     // until length mod 64 == 56, then append 64-bit LE bit length.
     std::uint8_t tail[128] = {0};
     const std::size_t rem = total % 64;
-    std::memcpy(tail, p + blocks * 64, rem);
+    if (rem > 0) std::memcpy(tail, p + blocks * 64, rem);
     tail[rem] = 0x80;
     const std::size_t pad_to = (rem < 56) ? 56 : 120;
     const std::uint64_t bit_len = std::uint64_t(total) * 8u;
@@ -206,7 +206,7 @@ std::vector<std::byte> Sha1Impl(std::span<const std::byte> data) {
 
     std::uint8_t tail[128] = {0};
     const std::size_t rem = total % 64;
-    std::memcpy(tail, p + blocks * 64, rem);
+    if (rem > 0) std::memcpy(tail, p + blocks * 64, rem);
     tail[rem] = 0x80;
     const std::size_t pad_to = (rem < 56) ? 56 : 120;
     StoreBe64(tail + pad_to, std::uint64_t(total) * 8u);
@@ -282,7 +282,7 @@ std::vector<std::byte> Sha256Impl(std::span<const std::byte> data) {
 
     std::uint8_t tail[128] = {0};
     const std::size_t rem = total % 64;
-    std::memcpy(tail, p + blocks * 64, rem);
+    if (rem > 0) std::memcpy(tail, p + blocks * 64, rem);
     tail[rem] = 0x80;
     const std::size_t pad_to = (rem < 56) ? 56 : 120;
     StoreBe64(tail + pad_to, std::uint64_t(total) * 8u);

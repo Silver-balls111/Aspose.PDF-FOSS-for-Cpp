@@ -1,13 +1,16 @@
 // =============================================================================
 // facades_pdf_page_editor_smoke_test — beat Fa11 of the Facades cluster.
 // PdfPageEditor stages page-level edits (move/rotate/zoom/align +
-// transitions). GetPages is real (page count); the transform operations
-// + per-page geometry are v1 stubs (canonical defaults). 16 page-
-// transition constants are pinned to canonical values.
+// transitions). GetPages / GetPageSize / GetPageRotation query the bound
+// document, and ApplyChanges applies the staged rotation, page size, and
+// MovePosition content translation. 16 page-transition constants are
+// pinned to canonical values.
 // =============================================================================
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -19,6 +22,10 @@
 #include <aspose/pdf/page_collection.hpp>
 #include <aspose/pdf/page_size.hpp>
 #include <aspose/pdf/vertical_alignment.hpp>
+
+#include "objects.hpp"
+#include "pages_tree.hpp"
+#include "trailer.hpp"
 
 #include <gtest/gtest.h>
 
@@ -77,6 +84,67 @@ TEST(FacadesPdfPageEditorSmoke, GeometryAndApplyChanges) {
 TEST(FacadesPdfPageEditorSmoke, UnboundGetPagesZero) {
     PdfPageEditor editor;
     EXPECT_EQ(editor.GetPages(), 0);
+}
+
+TEST(FacadesPdfPageEditorSmoke, MovePositionTranslatesContentOnApply) {
+    Document doc{HelloWorldPdf()};
+    PdfPageEditor editor{doc};
+    editor.MovePosition(15.0f, 25.0f);
+    editor.ApplyChanges();
+
+    const std::string out =
+        (std::filesystem::temp_directory_path() / "pageeditor_move.pdf")
+            .string();
+    doc.Save(out);
+
+    // The content streams gain a `q 1 0 0 1 15 25 cm` wrapper + `Q`.
+    std::ifstream in(out, std::ios::binary | std::ios::ate);
+    const auto end = in.tellg();
+    std::vector<std::byte> bytes(static_cast<std::size_t>(end));
+    in.seekg(0, std::ios::beg);
+    in.read(reinterpret_cast<char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+    in.close();
+    std::span<const std::byte> sp(bytes.data(), bytes.size());
+    const auto tree = foundation::pages_tree::Parse(sp);
+    const auto dump = foundation::objects::Parse(sp);
+    ASSERT_FALSE(tree.leaves.empty());
+    bool found_wrapper = false;
+    std::vector<std::uint32_t> stream_ids;
+    for (const auto& o : dump.objects) {
+        if (o.id != tree.leaves[0].id) continue;
+        const auto* pd = std::get_if<foundation::objects::Dict>(&o.value.v);
+        ASSERT_NE(pd, nullptr);
+        for (const auto& kv : pd->entries) {
+            if (kv.first != "Contents") continue;
+            if (const auto* r =
+                    std::get_if<foundation::objects::Ref>(&kv.second.v))
+                stream_ids.push_back(r->id);
+            else if (const auto* a = std::get_if<foundation::objects::Array>(
+                         &kv.second.v))
+                for (const auto& it : a->items)
+                    if (const auto* rr =
+                            std::get_if<foundation::objects::Ref>(&it.v))
+                        stream_ids.push_back(rr->id);
+        }
+    }
+    ASSERT_GE(stream_ids.size(), 3u);  // wrapper + original + wrapper
+    for (std::uint32_t sid : stream_ids) {
+        for (const auto& o : dump.objects) {
+            if (o.id != sid) continue;
+            const auto* st =
+                std::get_if<foundation::objects::Stream>(&o.value.v);
+            if (st == nullptr) break;
+            const std::string body(
+                reinterpret_cast<const char*>(st->body.data()),
+                st->body.size());
+            if (body.find("q 1 0 0 1 15 25 cm") != std::string::npos)
+                found_wrapper = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found_wrapper);
+    EXPECT_EQ(std::filesystem::remove(out), true);
 }
 
 TEST(FacadesPdfPageEditorSmoke, PropertyRoundtrip) {

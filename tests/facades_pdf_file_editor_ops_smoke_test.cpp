@@ -8,6 +8,8 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -16,6 +18,11 @@
 #include <aspose/pdf/page.hpp>
 #include <aspose/pdf/page_collection.hpp>
 #include <aspose/pdf/text_absorber.hpp>
+
+#include "flate.hpp"
+#include "objects.hpp"
+#include "pages_tree.hpp"
+#include "trailer.hpp"
 
 #include <gtest/gtest.h>
 
@@ -41,6 +48,96 @@ std::string DocText(const std::string& path) {
     Aspose::Pdf::Text::TextAbsorber abs;
     abs.Visit(d);
     return abs.Text();
+}
+
+std::vector<std::byte> ReadAll(const std::string& path) {
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
+    const auto end = in.tellg();
+    std::vector<std::byte> bytes(static_cast<std::size_t>(end));
+    in.seekg(0, std::ios::beg);
+    in.read(reinterpret_cast<char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+    return bytes;
+}
+
+// Decoded bodies of the page's /Contents streams, in order.
+std::vector<std::string> PageContentStreams(const std::string& path,
+                                            int page1Based) {
+    const auto bytes = ReadAll(path);
+    std::span<const std::byte> sp(bytes.data(), bytes.size());
+    const auto tree = foundation::pages_tree::Parse(sp);
+    const auto dump = foundation::objects::Parse(sp);
+    std::vector<std::string> out;
+    if (page1Based < 1 ||
+        static_cast<std::size_t>(page1Based) > tree.leaves.size())
+        return out;
+    const std::uint32_t pid = tree.leaves[page1Based - 1].id;
+    const foundation::objects::IndirectObject* page_obj = nullptr;
+    for (const auto& o : dump.objects)
+        if (o.id == pid) page_obj = &o;
+    if (page_obj == nullptr) return out;
+    const auto* pd =
+        std::get_if<foundation::objects::Dict>(&page_obj->value.v);
+    if (pd == nullptr) return out;
+    std::vector<std::uint32_t> ids;
+    for (const auto& kv : pd->entries) {
+        if (kv.first != "Contents") continue;
+        if (const auto* r = std::get_if<foundation::objects::Ref>(&kv.second.v))
+            ids.push_back(r->id);
+        else if (const auto* a =
+                     std::get_if<foundation::objects::Array>(&kv.second.v))
+            for (const auto& it : a->items)
+                if (const auto* rr =
+                        std::get_if<foundation::objects::Ref>(&it.v))
+                    ids.push_back(rr->id);
+    }
+    for (std::uint32_t sid : ids) {
+        for (const auto& o : dump.objects) {
+            if (o.id != sid) continue;
+            const auto* st =
+                std::get_if<foundation::objects::Stream>(&o.value.v);
+            if (st == nullptr) break;
+            std::vector<std::byte> body(st->body.begin(), st->body.end());
+            bool flate = false;
+            for (const auto& kv : st->header.entries) {
+                if (kv.first == "Filter")
+                    if (const auto* n = std::get_if<std::string>(&kv.second.v))
+                        flate = *n == "FlateDecode";
+            }
+            if (flate) {
+                try {
+                    body = foundation::flate::Decode(st->body);
+                } catch (const std::exception&) {
+                }
+            }
+            out.emplace_back(reinterpret_cast<const char*>(body.data()),
+                             body.size());
+            break;
+        }
+    }
+    return out;
+}
+
+// True when some /Subtype /Form stream in the file contains `needle`.
+bool FormBodyContains(const std::string& path, const std::string& needle) {
+    const auto bytes = ReadAll(path);
+    const auto dump = foundation::objects::Parse(
+        std::span<const std::byte>(bytes.data(), bytes.size()));
+    for (const auto& o : dump.objects) {
+        const auto* st = std::get_if<foundation::objects::Stream>(&o.value.v);
+        if (st == nullptr) continue;
+        bool is_form = false;
+        for (const auto& kv : st->header.entries) {
+            if (kv.first == "Subtype")
+                if (const auto* n = std::get_if<std::string>(&kv.second.v))
+                    is_form = *n == "Form";
+        }
+        if (!is_form) continue;
+        const std::string body(reinterpret_cast<const char*>(st->body.data()),
+                               st->body.size());
+        if (body.find(needle) != std::string::npos) return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -139,20 +236,58 @@ TEST(PdfFileEditorOpsSmoke, MakeNUp) {
     PdfFileEditor ed;
     ASSERT_TRUE(ed.MakeNUp(HelloWorldPdf(), TwoPagesPdf(), out));
     Document re{out};
-    EXPECT_EQ(re.Pages().Count(), 3u);  // 1 + 2
+    // Real 2-up imposition: the two files' pages pair onto sheets —
+    // 1 + 2 source pages → 2 output sheets, not a 3-page concatenation.
+    EXPECT_EQ(re.Pages().Count(), 2u);
+    // Sheet 1 joins hello_world (612x792) with two_pages p1 (612x792)
+    // side by side.
+    const auto s1 = re.Pages()[1];
+    EXPECT_FLOAT_EQ(s1.Rect().Width(), 1224.0);
+    EXPECT_FLOAT_EQ(s1.Rect().Height(), 792.0);
+    // Sheet 2 carries only the second file's page 2.
+    const auto s2 = re.Pages()[2];
+    EXPECT_FLOAT_EQ(s2.Rect().Width(), 612.0);
+    EXPECT_FLOAT_EQ(s2.Rect().Height(), 792.0);
+    // Each source page's content moved into a Form XObject.
+    EXPECT_TRUE(FormBodyContains(out, "Hello World"));
+    EXPECT_TRUE(FormBodyContains(out, "Page one"));
+    EXPECT_TRUE(FormBodyContains(out, "Page two"));
     std::filesystem::remove(out);
 }
 
 TEST(PdfFileEditorOpsSmoke, ResizeContents) {
-    const std::string out = Tmp("resize.pdf");
+    // Parameters variant: new page size, content scaled into the box.
+    const std::string out = Tmp("resize_params.pdf");
     PdfFileEditor ed;
-    ASSERT_TRUE(ed.ResizeContentsPct(HelloWorldPdf(), out, 50.0, 50.0));
-    Document re{out};
-    EXPECT_EQ(re.Pages().Count(), 1u);
-    auto page = re.Pages()[1];
-    EXPECT_GT(page.Rect().Width(), 0.0);
-    EXPECT_GT(page.Rect().Height(), 0.0);
+    PdfFileEditor::ContentsResizeParameters params;
+    params.NewPageWidth(PdfFileEditor::ContentsResizeValue::Units(400.0));
+    params.NewPageHeight(PdfFileEditor::ContentsResizeValue::Units(300.0));
+    ASSERT_TRUE(ed.ResizeContents(HelloWorldPdf(), out, {1}, params));
+    {
+        Document re{out};
+        const auto page = re.Pages()[1];
+        EXPECT_FLOAT_EQ(page.Rect().Width(), 400.0);
+        EXPECT_FLOAT_EQ(page.Rect().Height(), 300.0);
+    }
     std::filesystem::remove(out);
+
+    // Percent variant: the page box stays untouched, the content shrinks
+    // to the requested percentage and is centred (a q .. cm / Q wrapper
+    // appears around the content streams).
+    const std::string out2 = Tmp("resize_pct.pdf");
+    ASSERT_TRUE(ed.ResizeContentsPct(HelloWorldPdf(), out2, 50.0, 50.0));
+    {
+        Document re{out2};
+        const auto page = re.Pages()[1];
+        EXPECT_FLOAT_EQ(page.Rect().Width(), 612.0);
+        EXPECT_FLOAT_EQ(page.Rect().Height(), 792.0);
+    }
+    const auto streams = PageContentStreams(out2, 1);
+    ASSERT_GE(streams.size(), 3u);  // wrapper + original + wrapper
+    EXPECT_NE(streams.front().find("cm"), std::string::npos);
+    EXPECT_EQ(streams.front().find("q "), 0u);
+    EXPECT_EQ(streams.back(), "Q\n");
+    std::filesystem::remove(out2);
 }
 
 TEST(PdfFileEditorOpsSmoke, AddMargins) {
@@ -161,6 +296,15 @@ TEST(PdfFileEditorOpsSmoke, AddMargins) {
     ASSERT_TRUE(ed.AddMargins(HelloWorldPdf(), out, {1}, 10, 10, 20, 20));
     Document re{out};
     EXPECT_EQ(re.Pages().Count(), 1u);
+    const auto page = re.Pages()[1];
+    // The page grows by the margins...
+    EXPECT_FLOAT_EQ(page.Rect().Width(), 632.0);
+    EXPECT_FLOAT_EQ(page.Rect().Height(), 832.0);
+    // ...and the content is translated to the new bottom-left origin
+    // (left = 10, bottom = 20 stay blank).
+    const auto streams = PageContentStreams(out, 1);
+    ASSERT_GE(streams.size(), 3u);
+    EXPECT_NE(streams.front().find("q 1 0 0 1 10 20 cm"), std::string::npos);
     std::filesystem::remove(out);
 }
 
@@ -179,16 +323,32 @@ TEST(PdfFileEditorOpsSmoke, TryResizeContentsFailureReturnsFalse) {
     EXPECT_FALSE(std::filesystem::exists(out));
 }
 
-TEST(PdfFileEditorOpsSmoke, AddPageBreakHonestReturn) {
+TEST(PdfFileEditorOpsSmoke, AddPageBreak) {
     const std::string out = Tmp("pagebreak.pdf");
     PdfFileEditor ed;
-    // Empty breaks is a safe no-op round-trip
+    // Empty breaks is a safe no-op round-trip.
     EXPECT_TRUE(ed.AddPageBreak(HelloWorldPdf(), out, {}));
     EXPECT_TRUE(std::filesystem::exists(out));
     std::filesystem::remove(out);
 
-    // Non-empty breaks returns false because content stream splitting is not supported
+    // A break at y=100 on page 1 splits it into two same-size pages.
     PdfFileEditor::PageBreak pb{1, 100.0};
-    EXPECT_FALSE(ed.AddPageBreak(HelloWorldPdf(), out, {pb}));
+    ASSERT_TRUE(ed.AddPageBreak(HelloWorldPdf(), out, {pb}));
+    Document re{out};
+    ASSERT_EQ(re.Pages().Count(), 2u);
+    EXPECT_FLOAT_EQ(re.Pages()[1].Rect().Width(), 612.0);
+    EXPECT_FLOAT_EQ(re.Pages()[1].Rect().Height(), 792.0);
+    EXPECT_FLOAT_EQ(re.Pages()[2].Rect().Width(), 612.0);
+    EXPECT_FLOAT_EQ(re.Pages()[2].Rect().Height(), 792.0);
+    // Clip-based split: both band pages carry the original text.
+    EXPECT_NE(DocText(out).find("Hello World"), std::string::npos);
+    // Each band's content is wrapped in a `re W n` clip.
+    for (int p = 1; p <= 2; ++p) {
+        const auto streams = PageContentStreams(out, p);
+        ASSERT_GE(streams.size(), 3u);
+        EXPECT_NE(streams.front().find("re W n"), std::string::npos);
+        EXPECT_EQ(streams.back(), "Q\n");
+    }
+    std::filesystem::remove(out);
 }
 

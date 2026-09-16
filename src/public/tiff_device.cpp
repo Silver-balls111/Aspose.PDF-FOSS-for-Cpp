@@ -445,8 +445,10 @@ void TiffDevice::BinarizeBradley(std::istream& inputImageStream,
         (std::istreambuf_iterator<char>(inputImageStream)),
         std::istreambuf_iterator<char>());
     std::vector<std::byte> input_bytes(input_chars.size());
-    std::memcpy(input_bytes.data(), input_chars.data(),
-                input_chars.size());
+    if (!input_chars.empty()) {
+        std::memcpy(input_bytes.data(), input_chars.data(),
+                    input_chars.size());
+    }
 
     if (input_bytes.empty()) {
         throw std::runtime_error(
