@@ -15,6 +15,12 @@
 #include <aspose/pdf/page.hpp>
 #include <aspose/pdf/page_collection.hpp>
 
+#include <aspose/pdf/annotations/free_text_annotation.hpp>
+#include <aspose/pdf/annotations/line_annotation.hpp>
+#include <aspose/pdf/annotations/strike_out_annotation.hpp>
+#include <aspose/pdf/annotations/underline_annotation.hpp>
+#include <optional>
+
 namespace Aspose::Pdf::Facades {
 
 using namespace Aspose::Pdf::Annotations;
@@ -25,28 +31,71 @@ PdfAnnotationEditor::PdfAnnotationEditor(Aspose::Pdf::Document& document) {
 
 namespace {
 
-Rectangle ParseRect(const std::string& str) {
+std::string DecodeXmlEntities(const std::string& str) {
+    std::string out;
+    out.reserve(str.size());
+    for (size_t i = 0; i < str.size(); ++i) {
+        if (str[i] == '&') {
+            auto semi = str.find(';', i);
+            if (semi != std::string::npos && semi - i < 10) {
+                std::string ent = str.substr(i + 1, semi - i - 1);
+                if (ent == "amp") { out += '&'; i = semi; continue; }
+                if (ent == "lt") { out += '<'; i = semi; continue; }
+                if (ent == "gt") { out += '>'; i = semi; continue; }
+                if (ent == "quot") { out += '"'; i = semi; continue; }
+                if (ent == "apos") { out += '\''; i = semi; continue; }
+                if (!ent.empty() && ent[0] == '#') {
+                    int code = 0;
+                    if (ent.size() > 1 && (ent[1] == 'x' || ent[1] == 'X')) {
+                        try { code = std::stoi(ent.substr(2), nullptr, 16); } catch (...) {}
+                    } else {
+                        try { code = std::stoi(ent.substr(1)); } catch (...) {}
+                    }
+                    if (code > 0 && code < 128) {
+                        out += static_cast<char>(code);
+                        i = semi;
+                        continue;
+                    }
+                }
+            }
+        }
+        out += str[i];
+    }
+    return out;
+}
+
+std::optional<Rectangle> ParseRect(const std::string& str) {
+    if (str.empty()) return std::nullopt;
     std::stringstream ss(str);
     std::string item;
     std::vector<double> vals;
     while (std::getline(ss, item, ',')) {
         try {
             vals.push_back(std::stod(item));
-        } catch (...) {}
+        } catch (...) {
+            return std::nullopt;
+        }
     }
     if (vals.size() >= 4) {
         return Rectangle(vals[0], vals[1], vals[2], vals[3], true);
     }
-    return Rectangle(0, 0, 100, 100, true);
+    return std::nullopt;
 }
 
 std::string GetAttr(const std::string& tag, const std::string& attrName) {
     auto pos = tag.find(attrName + "=\"");
-    if (pos == std::string::npos) return "";
+    if (pos == std::string::npos) {
+        pos = tag.find(attrName + "='");
+        if (pos == std::string::npos) return "";
+        pos += attrName.size() + 2;
+        auto end = tag.find("'", pos);
+        if (end == std::string::npos) return "";
+        return DecodeXmlEntities(tag.substr(pos, end - pos));
+    }
     pos += attrName.size() + 2;
     auto end = tag.find("\"", pos);
     if (end == std::string::npos) return "";
-    return tag.substr(pos, end - pos);
+    return DecodeXmlEntities(tag.substr(pos, end - pos));
 }
 
 }  // namespace
@@ -54,6 +103,20 @@ std::string GetAttr(const std::string& tag, const std::string& attrName) {
 // ===== Import (XFDF) =========================================================
 
 void PdfAnnotationEditor::ImportAnnotationsFromXfdf(const std::string& xfdfFile) {
+    ImportAnnotationFromXfdf(xfdfFile, {});
+}
+
+void PdfAnnotationEditor::ImportAnnotationsFromFdf(const std::string& /*fdfFile*/) {
+    // FDF uses PDF COS syntax, not XML/XFDF. FDF parsing is not supported in v1 FOSS.
+}
+
+void PdfAnnotationEditor::ImportAnnotationFromXfdf(const std::string& xfdfFile) {
+    ImportAnnotationFromXfdf(xfdfFile, {});
+}
+
+void PdfAnnotationEditor::ImportAnnotationFromXfdf(
+    const std::string& xfdfFile,
+    const std::vector<Aspose::Pdf::Annotations::AnnotationType>& annotTypes) {
     if (document_ == nullptr) return;
     std::ifstream in(xfdfFile);
     if (!in.is_open()) return;
@@ -64,10 +127,24 @@ void PdfAnnotationEditor::ImportAnnotationsFromXfdf(const std::string& xfdfFile)
     auto& pages = document_->Pages();
     const int pageCount = static_cast<int>(pages.Count());
 
-    auto processTags = [&](const std::string& tagType) {
+    auto isTypeAllowed = [&](AnnotationType type) {
+        if (annotTypes.empty()) return true;
+        return std::find(annotTypes.begin(), annotTypes.end(), type) != annotTypes.end();
+    };
+
+    auto processTags = [&](const std::string& tagType, AnnotationType mappedType) {
+        if (!isTypeAllowed(mappedType)) return;
         size_t pos = 0;
         std::string openTag = "<" + tagType;
         while ((pos = content.find(openTag, pos)) != std::string::npos) {
+            // Ensure tag delimiter match (e.g. not matching <textsomething)
+            if (pos + openTag.size() < content.size()) {
+                char nextChar = content[pos + openTag.size()];
+                if (nextChar != ' ' && nextChar != '>' && nextChar != '/' && nextChar != '\t' && nextChar != '\n' && nextChar != '\r') {
+                    pos += openTag.size();
+                    continue;
+                }
+            }
             auto closePos = content.find(">", pos);
             if (closePos == std::string::npos) break;
             std::string tagHeader = content.substr(pos, closePos - pos + 1);
@@ -80,65 +157,97 @@ void PdfAnnotationEditor::ImportAnnotationsFromXfdf(const std::string& xfdfFile)
             int pageNum = page + 1; // XFDF is 0-based, Aspose is 1-based
             if (pageNum < 1 || pageNum > pageCount) pageNum = 1;
 
-            Rectangle rect = ParseRect(GetAttr(tagHeader, "rect"));
+            auto rectOpt = ParseRect(GetAttr(tagHeader, "rect"));
+            if (!rectOpt.has_value()) {
+                pos = closePos + 1;
+                continue;
+            }
+            Rectangle rect = *rectOpt;
             std::string title = GetAttr(tagHeader, "title");
             std::string contents = GetAttr(tagHeader, "contents");
 
-            Page pg = pages[pageNum];
-            if (tagType == "square") {
-                auto sq = std::make_unique<SquareAnnotation>(pg, rect);
-                if (!contents.empty()) sq->Contents(contents);
-                if (!title.empty()) sq->Title(title);
-                pg.Annotations().Add(*sq);
-                owned_annotations_.push_back(std::move(sq));
-            } else if (tagType == "circle") {
-                auto ci = std::make_unique<CircleAnnotation>(pg, rect);
-                if (!contents.empty()) ci->Contents(contents);
-                if (!title.empty()) ci->Title(title);
-                pg.Annotations().Add(*ci);
-                owned_annotations_.push_back(std::move(ci));
-            } else if (tagType == "text") {
-                auto txt = std::make_unique<TextAnnotation>(pg, rect);
-                if (!contents.empty()) txt->Contents(contents);
-                if (!title.empty()) txt->Title(title);
-                pg.Annotations().Add(*txt);
-                owned_annotations_.push_back(std::move(txt));
-            } else if (tagType == "highlight") {
-                auto hl = std::make_unique<HighlightAnnotation>(pg, rect);
-                if (!contents.empty()) hl->Contents(contents);
-                if (!title.empty()) hl->Title(title);
-                pg.Annotations().Add(*hl);
-                owned_annotations_.push_back(std::move(hl));
+            bool isSelfClosing = (closePos > 0 && content[closePos - 1] == '/');
+            if (!isSelfClosing) {
+                std::string endTag = "</" + tagType + ">";
+                auto endPos = content.find(endTag, closePos);
+                if (endPos != std::string::npos) {
+                    std::string body = content.substr(closePos + 1, endPos - closePos - 1);
+                    auto cstart = body.find("<contents>");
+                    if (cstart != std::string::npos) {
+                        cstart += 10;
+                        auto cend = body.find("</contents>", cstart);
+                        if (cend != std::string::npos) {
+                            contents = DecodeXmlEntities(body.substr(cstart, cend - cstart));
+                        }
+                    } else {
+                        auto rstart = body.find("<contents-richtext>");
+                        if (rstart != std::string::npos) {
+                            rstart += 19;
+                            auto rend = body.find("</contents-richtext>", rstart);
+                            if (rend != std::string::npos) {
+                                contents = DecodeXmlEntities(body.substr(rstart, rend - rstart));
+                            }
+                        }
+                    }
+                    pos = endPos + endTag.size();
+                } else {
+                    pos = closePos + 1;
+                }
+            } else {
+                pos = closePos + 1;
             }
-            pos = closePos + 1;
+
+            Page pg = pages[pageNum];
+            std::unique_ptr<Annotation> annot;
+            if (tagType == "square") {
+                annot = std::make_unique<SquareAnnotation>(pg, rect);
+            } else if (tagType == "circle") {
+                annot = std::make_unique<CircleAnnotation>(pg, rect);
+            } else if (tagType == "text") {
+                annot = std::make_unique<TextAnnotation>(pg, rect);
+            } else if (tagType == "highlight") {
+                annot = std::make_unique<HighlightAnnotation>(pg, rect);
+            } else if (tagType == "freetext") {
+                annot = std::make_unique<FreeTextAnnotation>(pg, rect, DefaultAppearance{});
+            } else if (tagType == "underline") {
+                annot = std::make_unique<UnderlineAnnotation>(pg, rect);
+            } else if (tagType == "strikeout") {
+                annot = std::make_unique<StrikeOutAnnotation>(pg, rect);
+            } else if (tagType == "line") {
+                annot = std::make_unique<LineAnnotation>(
+                    pg, rect, Point(rect.LLX(), rect.LLY()), Point(rect.URX(), rect.URY()));
+            }
+
+            if (annot != nullptr) {
+                if (!contents.empty()) annot->Contents(contents);
+                if (!title.empty()) {
+                    if (auto* ma = dynamic_cast<MarkupAnnotation*>(annot.get())) {
+                        ma->Title(title);
+                    }
+                }
+                pg.Annotations().Add(std::move(annot));
+            }
         }
     };
 
-    processTags("square");
-    processTags("circle");
-    processTags("text");
-    processTags("highlight");
+    processTags("square", AnnotationType::Square);
+    processTags("circle", AnnotationType::Circle);
+    processTags("text", AnnotationType::Text);
+    processTags("highlight", AnnotationType::Highlight);
+    processTags("freetext", AnnotationType::FreeText);
+    processTags("underline", AnnotationType::Underline);
+    processTags("strikeout", AnnotationType::StrikeOut);
+    processTags("line", AnnotationType::Line);
 }
 
-void PdfAnnotationEditor::ImportAnnotationsFromFdf(const std::string& fdfFile) {
-    ImportAnnotationsFromXfdf(fdfFile);
-}
-void PdfAnnotationEditor::ImportAnnotationFromXfdf(const std::string& xfdfFile) {
-    ImportAnnotationsFromXfdf(xfdfFile);
-}
-void PdfAnnotationEditor::ImportAnnotationFromXfdf(
-    const std::string& xfdfFile,
-    const std::vector<Aspose::Pdf::Annotations::AnnotationType>&) {
-    ImportAnnotationsFromXfdf(xfdfFile);
-}
 void PdfAnnotationEditor::ImportAnnotations(
     const std::vector<std::string>& annotFiles,
-    const std::vector<Aspose::Pdf::Annotations::AnnotationType>&) {
-    for (const auto& f : annotFiles) ImportAnnotationsFromXfdf(f);
+    const std::vector<Aspose::Pdf::Annotations::AnnotationType>& annotTypes) {
+    for (const auto& f : annotFiles) ImportAnnotationFromXfdf(f, annotTypes);
 }
 void PdfAnnotationEditor::ImportAnnotations(
     const std::vector<std::string>& annotFiles) {
-    for (const auto& f : annotFiles) ImportAnnotationsFromXfdf(f);
+    for (const auto& f : annotFiles) ImportAnnotationFromXfdf(f, {});
 }
 
 // ===== Modify ================================================================

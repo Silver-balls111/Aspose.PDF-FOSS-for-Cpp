@@ -428,8 +428,10 @@ bool PdfFileEditor::TrySplitToEnd(const std::string& inputFile, int location,
     }, true, allow_concatenate_exceptions_);
 }
 
-bool PdfFileEditor::MakeBooklet(const std::string& inputFile,
-                                const std::string& outputFile) {
+bool PdfFileEditor::MakeBookletImpl(const std::string& inputFile,
+                                    const std::string& outputFile,
+                                    const Aspose::Pdf::PageSize* pageSize,
+                                    bool isTry) {
     return RunEditor([&] {
         Aspose::Pdf::Document src(inputFile);
         const int count = static_cast<int>(src.Pages().Count());
@@ -453,48 +455,29 @@ bool PdfFileEditor::MakeBooklet(const std::string& inputFile,
                 dest.Pages().Add();
             }
         }
+        if (pageSize != nullptr) {
+            for (std::size_t i = 1; i <= dest.Pages().Count(); ++i) {
+                dest.Pages()[static_cast<int>(i)].SetPageSize(pageSize->Width(), pageSize->Height());
+            }
+        }
         dest.Save(outputFile);
-    }, false, allow_concatenate_exceptions_);
+    }, isTry, allow_concatenate_exceptions_);
+}
+
+bool PdfFileEditor::MakeBooklet(const std::string& inputFile,
+                                const std::string& outputFile) {
+    return MakeBookletImpl(inputFile, outputFile, nullptr, false);
 }
 
 bool PdfFileEditor::MakeBooklet(const std::string& inputFile,
                                 const std::string& outputFile,
                                 Aspose::Pdf::PageSize pageSize) {
-    return RunEditor([&] {
-        Aspose::Pdf::Document src(inputFile);
-        const int count = static_cast<int>(src.Pages().Count());
-        if (count == 0) return;
-        int total = ((count + 3) / 4) * 4;
-        std::vector<int> booklet_order;
-        int l = 1, r = total;
-        while (l < r) {
-            booklet_order.push_back(r);
-            booklet_order.push_back(l);
-            booklet_order.push_back(l + 1);
-            booklet_order.push_back(r - 1);
-            l += 2;
-            r -= 2;
-        }
-        Aspose::Pdf::Document dest;
-        for (int p : booklet_order) {
-            if (p <= count) {
-                dest.ImportPagesFrom(src, {p}, 0);
-            } else {
-                dest.Pages().Add();
-            }
-        }
-        for (std::size_t i = 1; i <= dest.Pages().Count(); ++i) {
-            dest.Pages()[static_cast<int>(i)].SetPageSize(pageSize.Width(), pageSize.Height());
-        }
-        dest.Save(outputFile);
-    }, false, allow_concatenate_exceptions_);
+    return MakeBookletImpl(inputFile, outputFile, &pageSize, false);
 }
 
 bool PdfFileEditor::TryMakeBooklet(const std::string& inputFile,
                                    const std::string& outputFile) {
-    return RunEditor([&] {
-        (void)MakeBooklet(inputFile, outputFile);
-    }, true, allow_concatenate_exceptions_);
+    return MakeBookletImpl(inputFile, outputFile, nullptr, true);
 }
 
 bool PdfFileEditor::MakeNUp(const std::string& firstInputFile,
@@ -515,10 +498,11 @@ bool PdfFileEditor::TryMakeNUp(const std::string& firstInputFile,
     return ConcatenateTwo(firstInputFile, secondInputFile, outputFile, true);
 }
 
-bool PdfFileEditor::ResizeContents(const std::string& inputFile,
-                                   const std::string& outputFile,
-                                   const std::vector<int>& pages,
-                                   ContentsResizeParameters parameters) {
+bool PdfFileEditor::ResizeContentsImpl(const std::string& inputFile,
+                                       const std::string& outputFile,
+                                       const std::vector<int>& pages,
+                                       const ContentsResizeParameters& parameters,
+                                       bool isTry) {
     return RunEditor([&] {
         Aspose::Pdf::Document doc(inputFile);
         const int count = static_cast<int>(doc.Pages().Count());
@@ -542,7 +526,14 @@ bool PdfFileEditor::ResizeContents(const std::string& inputFile,
             page.SetPageSize(w, h);
         }
         doc.Save(outputFile);
-    }, false, allow_concatenate_exceptions_);
+    }, isTry, allow_concatenate_exceptions_);
+}
+
+bool PdfFileEditor::ResizeContents(const std::string& inputFile,
+                                   const std::string& outputFile,
+                                   const std::vector<int>& pages,
+                                   ContentsResizeParameters parameters) {
+    return ResizeContentsImpl(inputFile, outputFile, pages, parameters, false);
 }
 
 bool PdfFileEditor::ResizeContentsPct(const std::string& inputFile,
@@ -567,9 +558,7 @@ bool PdfFileEditor::TryResizeContents(const std::string& inputFile,
                                       const std::string& outputFile,
                                       const std::vector<int>& pages,
                                       ContentsResizeParameters parameters) {
-    return RunEditor([&] {
-        (void)ResizeContents(inputFile, outputFile, pages, parameters);
-    }, true, allow_concatenate_exceptions_);
+    return ResizeContentsImpl(inputFile, outputFile, pages, parameters, true);
 }
 
 bool PdfFileEditor::AddMargins(const std::string& inputFile,
@@ -616,11 +605,15 @@ bool PdfFileEditor::AddMarginsPct(const std::string& inputFile,
 
 bool PdfFileEditor::AddPageBreak(const std::string& inputFile,
                                  const std::string& outputFile,
-                                 const std::vector<PageBreak>& /*pageBreaks*/) {
-    return RunEditor([&] {
-        Aspose::Pdf::Document doc(inputFile);
-        doc.Save(outputFile);
-    }, false, allow_concatenate_exceptions_);
+                                 const std::vector<PageBreak>& pageBreaks) {
+    if (pageBreaks.empty()) {
+        return RunEditor([&] {
+            Aspose::Pdf::Document doc(inputFile);
+            doc.Save(outputFile);
+        }, false, allow_concatenate_exceptions_);
+    }
+    // Vertical page breaking across content streams is not supported in v1 FOSS.
+    return false;
 }
 
 // ===== Properties — real storage =============================================

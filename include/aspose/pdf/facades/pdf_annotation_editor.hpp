@@ -87,9 +87,6 @@ public:
     void DeleteAnnotations(const std::string& annotType);
     // Delete the uniquely-named annotation across all pages (real).
     void DeleteAnnotation(const std::string& annotName);
-
-private:
-    std::vector<std::unique_ptr<Aspose::Pdf::Annotations::Annotation>> owned_annotations_;
 };
 
 }  // namespace Aspose::Pdf::Facades

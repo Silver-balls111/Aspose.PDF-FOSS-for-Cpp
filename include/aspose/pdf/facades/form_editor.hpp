@@ -8,9 +8,12 @@
 // Input-file -> output-file (SrcFileName / DestFileName) or bound
 // Document. AddField and RemoveField construct the concrete Field for
 // the requested FieldType and route through the bound document's
-// AcroForm (Document::Form().Add / Delete). Field configuration
-// operations (Set*/Copy*/Decorate*/list-item/script/alignment) mutate
-// the bound field attributes and geometry.
+// AcroForm (Document::Form().Add / Delete). Supported field configuration
+// operations (SetFieldAttribute / SetFieldAppearance / SetFieldLimit /
+// SetFieldCombNumber / MoveField / Single2Multiple / SetFieldAlignment /
+// AddListItem / DelListItem / DecorateField / Copy*Field / RenameField)
+// mutate the bound field attributes and geometry. Action scripts and
+// submit URL/flag setters are unsupported in v1 and return false.
 //
 // Phased drops:
 //   * Stream ctors / SrcStream / DestStream — Stream cascade.

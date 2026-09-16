@@ -146,6 +146,74 @@ TEST(FacadesPdfAnnotationEditorSmoke, ImportFromXfdf) {
     std::filesystem::remove(xfdf);
 }
 
+TEST(FacadesPdfAnnotationEditorSmoke, XfdfChildContentsEntitiesAndMalformedRects) {
+    std::string xfdf = (std::filesystem::temp_directory_path() / "test_advanced.xfdf").string();
+    {
+        std::ofstream out(xfdf);
+        out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<xfdf xmlns=\"http://ns.adobe.com/xfdf/\">\n"
+            << "<annotations>\n"
+            << "  <square page=\"0\" rect=\"10,20,110,34\" title=\"Fish &amp; Chips\">\n"
+            << "    <contents>Note with &lt;special&gt; &amp; &quot;quoted&quot; text</contents>\n"
+            << "  </square>\n"
+            << "  <circle page=\"0\" rect=\"malformed,rect\" title=\"Bad\">\n"
+            << "    <contents>Should be skipped</contents>\n"
+            << "  </circle>\n"
+            << "  <text page=\"0\" rect=\"10,50,110,70\" title=\"Author &apos;Bob&apos;\" contents=\"Attribute &amp; Note\"/>\n"
+            << "</annotations>\n"
+            << "</xfdf>\n";
+    }
+
+    Document doc{HelloWorldPdf()};
+    {
+        PdfAnnotationEditor editor{doc};
+        editor.ImportAnnotationsFromXfdf(xfdf);
+    }
+    // Verifying no UAF: editor was destroyed, doc and page annotations remain valid!
+    ASSERT_EQ(doc.Pages()[1].Annotations().Count(), 2);  // Malformed circle skipped
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].Contents(),
+              "Note with <special> & \"quoted\" text");
+    auto* ma0 = dynamic_cast<MarkupAnnotation*>(&doc.Pages()[1].Annotations()[0]);
+    ASSERT_NE(ma0, nullptr);
+    EXPECT_EQ(ma0->Title(), "Fish & Chips");
+
+    EXPECT_EQ(doc.Pages()[1].Annotations()[1].Contents(), "Attribute & Note");
+    auto* ma1 = dynamic_cast<MarkupAnnotation*>(&doc.Pages()[1].Annotations()[1]);
+    ASSERT_NE(ma1, nullptr);
+    EXPECT_EQ(ma1->Title(), "Author 'Bob'");
+
+    std::string out = (std::filesystem::temp_directory_path() / "test_uaf_saved.pdf").string();
+    EXPECT_NO_THROW(doc.Save(out));
+    EXPECT_TRUE(std::filesystem::exists(out));
+    std::filesystem::remove(out);
+    std::filesystem::remove(xfdf);
+}
+
+TEST(FacadesPdfAnnotationEditorSmoke, XfdfTypeFiltering) {
+    std::string xfdf = (std::filesystem::temp_directory_path() / "test_filter.xfdf").string();
+    {
+        std::ofstream out(xfdf);
+        out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<xfdf xmlns=\"http://ns.adobe.com/xfdf/\">\n"
+            << "<annotations>\n"
+            << "  <square page=\"0\" rect=\"10,20,110,34\" contents=\"Square Note\"/>\n"
+            << "  <text page=\"0\" rect=\"10,50,110,70\" contents=\"Text Note\"/>\n"
+            << "</annotations>\n"
+            << "</xfdf>\n";
+    }
+
+    Document doc{HelloWorldPdf()};
+    PdfAnnotationEditor editor{doc};
+    // Filter to only import Text annotations
+    editor.ImportAnnotationFromXfdf(xfdf, {AnnotationType::Text});
+
+    ASSERT_EQ(doc.Pages()[1].Annotations().Count(), 1);
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].AnnotationType(), AnnotationType::Text);
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].Contents(), "Text Note");
+
+    std::filesystem::remove(xfdf);
+}
+
 TEST(FacadesPdfAnnotationEditorSmoke, UnboundDeleteIsSafe) {
     PdfAnnotationEditor editor;  // nothing bound
     editor.DeleteAnnotations();

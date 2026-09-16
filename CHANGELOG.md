@@ -16,11 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented choice field option management (`AddListItem`, `DelListItem`).
   - Implemented field decoration and copying (`DecorateField`, `CopyInnerField`, `CopyOuterField`, `AddSubmitBtn`).
 - **`Aspose::Pdf::Facades::PdfFileEditor`**:
-  - Implemented booklet layout creation (`MakeBooklet`, `TryMakeBooklet`).
-  - Implemented multi-document sheet merging (`MakeNUp`, `TryMakeNUp`).
-  - Implemented content resizing and margins (`ResizeContents`, `ResizeContentsPct`, `TryResizeContents`, `AddMargins`, `AddMarginsPct`, `AddPageBreak`).
+  - Implemented booklet page ordering (`MakeBooklet`, `TryMakeBooklet`).
+  - Implemented multi-document merging (`MakeNUp`, `TryMakeNUp`).
+  - Implemented page resize and margins (`ResizeContents`, `ResizeContentsPct`, `TryResizeContents`, `AddMargins`, `AddMarginsPct`).
 - **`Aspose::Pdf::Facades::PdfAnnotationEditor`**:
-  - Implemented XFDF annotation import (`ImportAnnotationsFromXfdf`) supporting `Square`, `Circle`, `Text`, and `Highlight` annotations.
+  - Implemented robust XFDF annotation import (`ImportAnnotationsFromXfdf`) supporting child `<contents>` tags, XML entity decoding, type filtering, and `Square`, `Circle`, `Text`, `Highlight`, `FreeText`, `Underline`, `StrikeOut`, and `Line` annotations.
   - Implemented annotation modification (`ModifyAnnotations`, `ModifyAnnotationsAuthor`) and flattening (`FlatteningAnnotations`).
 - **`Aspose::Pdf::Facades::PdfBookmarkEditor`**:
   - Implemented XML bookmark export and import (`ExportBookmarksToXML`, `ImportBookmarksWithXML`).
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Implemented page rotation/resizing staged writes and `ApplyChanges()`.
   - Implemented PDF header version detection (`GetPdfVersion`) and encryption detection (`HasOpenPassword`, `HasEditPassword`).
 - **`Aspose::Pdf::Facades::PdfFileSignature`**:
-  - Implemented digital signature removal (`RemoveSignature` with `keepFieldEmpty` support, `RemoveSignatures`, `RemoveUsageRights`).
+  - Implemented digital signature removal (`RemoveSignature` with `keepFieldEmpty` support, `RemoveSignatures`).
 - **`Aspose::Pdf::Facades::PdfExtractor`**:
   - Implemented embedded file attachment extraction (`ExtractAttachment`, `GetAttachment`, `GetAttachNames`, `GetAttachmentInfo`).
   - Updated `FileSpecification` constructor to eagerly load file data from disk.

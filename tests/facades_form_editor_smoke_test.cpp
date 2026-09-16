@@ -108,7 +108,10 @@ TEST(FacadesFormEditorSmoke, ConfigurationReal) {
 
     EXPECT_TRUE(editor.SetFieldAttribute("f", PropertyFlag::ReadOnly));
     EXPECT_TRUE(editor.SetFieldLimit("f", 10));
-    EXPECT_TRUE(editor.SetFieldScript("f", "app.alert('x')"));
+    EXPECT_FALSE(editor.SetFieldScript("f", "app.alert('x')"));
+    EXPECT_FALSE(editor.AddFieldScript("f", "app.alert('y')"));
+    EXPECT_FALSE(editor.SetSubmitUrl("f", "https://example.com"));
+    EXPECT_FALSE(editor.SetSubmitFlag("f", SubmitFormFlag::Pdf));
     EXPECT_TRUE(editor.Single2Multiple("f"));
     EXPECT_TRUE(editor.MoveField("f", 50, 50, 150, 150));
 

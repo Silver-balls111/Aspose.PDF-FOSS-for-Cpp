@@ -170,14 +170,13 @@ Aspose::Pdf::Annotations::AnnotationFlags FormEditor::GetFieldAppearance(
 }
 
 bool FormEditor::SetSubmitFlag(const std::string& /*fieldName*/,
-                               SubmitFormFlag flag) {
-    submit_flag_ = flag;
-    return true;
+                               SubmitFormFlag /*flag*/) {
+    return false;
 }
 
 bool FormEditor::SetSubmitUrl(const std::string& /*fieldName*/,
                               const std::string& /*url*/) {
-    return true;
+    return false;
 }
 
 bool FormEditor::SetFieldLimit(const std::string& fieldName, int fieldLimit) {
@@ -218,12 +217,12 @@ bool FormEditor::MoveField(const std::string& fieldName,
 
 bool FormEditor::SetFieldScript(const std::string& /*fieldName*/,
                                 const std::string& /*script*/) {
-    return true;
+    return false;
 }
 
 bool FormEditor::AddFieldScript(const std::string& /*fieldName*/,
                                 const std::string& /*script*/) {
-    return true;
+    return false;
 }
 
 bool FormEditor::Single2Multiple(const std::string& fieldName) {

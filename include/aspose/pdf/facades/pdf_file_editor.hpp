@@ -357,6 +357,14 @@ private:
     bool InsertImpl(const std::string& inputFile, int insertLocation,
                     const std::string& portFile, int startPage, int endPage,
                     const std::string& outputFile, bool isTry);
+    bool MakeBookletImpl(const std::string& inputFile,
+                         const std::string& outputFile,
+                         const Aspose::Pdf::PageSize* pageSize, bool isTry);
+    bool ResizeContentsImpl(const std::string& inputFile,
+                            const std::string& outputFile,
+                            const std::vector<int>& pages,
+                            const ContentsResizeParameters& parameters,
+                            bool isTry);
 
     bool allow_concatenate_exceptions_ = false;
     bool close_concatenated_streams_ = false;

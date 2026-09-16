@@ -20,13 +20,30 @@ void AnnotationCollection::Add(Annotation& annotation) {
     Add(annotation, /*considerRotation=*/false);
 }
 
+void AnnotationCollection::Add(std::unique_ptr<Annotation> annotation,
+                                bool considerRotation) {
+    if (!annotation) return;
+    Annotation* raw = annotation.get();
+    owned_.push_back(std::move(annotation));
+    items_.push_back(raw);
+    consider_rotation_.push_back(considerRotation);
+}
+
 void AnnotationCollection::Delete(int index) {
     if (index < 0 || static_cast<std::size_t>(index) >= items_.size()) {
         throw std::out_of_range(
             "AnnotationCollection::Delete: index out of range");
     }
+    Annotation* raw = items_[index];
     items_.erase(items_.begin() + index);
     consider_rotation_.erase(consider_rotation_.begin() + index);
+    auto it = std::find_if(owned_.begin(), owned_.end(),
+                           [raw](const std::unique_ptr<Annotation>& p) {
+                               return p.get() == raw;
+                           });
+    if (it != owned_.end()) {
+        owned_.erase(it);
+    }
 }
 
 void AnnotationCollection::Delete() {
@@ -41,12 +58,20 @@ void AnnotationCollection::Delete(const Annotation& annotation) {
         items_.erase(it);
         consider_rotation_.erase(
             consider_rotation_.begin() + idx);
+        auto oit = std::find_if(owned_.begin(), owned_.end(),
+                               [&annotation](const std::unique_ptr<Annotation>& p) {
+                                   return p.get() == &annotation;
+                               });
+        if (oit != owned_.end()) {
+            owned_.erase(oit);
+        }
     }
 }
 
 void AnnotationCollection::Clear() {
     items_.clear();
     consider_rotation_.clear();
+    owned_.clear();
 }
 
 bool AnnotationCollection::Remove(const Annotation& annotation) {
@@ -56,6 +81,13 @@ bool AnnotationCollection::Remove(const Annotation& annotation) {
         it - items_.begin());
     items_.erase(it);
     consider_rotation_.erase(consider_rotation_.begin() + idx);
+    auto oit = std::find_if(owned_.begin(), owned_.end(),
+                           [&annotation](const std::unique_ptr<Annotation>& p) {
+                               return p.get() == &annotation;
+                           });
+    if (oit != owned_.end()) {
+        owned_.erase(oit);
+    }
     return true;
 }
 

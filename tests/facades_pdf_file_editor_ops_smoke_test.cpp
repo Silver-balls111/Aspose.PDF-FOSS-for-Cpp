@@ -164,3 +164,31 @@ TEST(PdfFileEditorOpsSmoke, AddMargins) {
     std::filesystem::remove(out);
 }
 
+TEST(PdfFileEditorOpsSmoke, TryMakeBookletFailureReturnsFalse) {
+    const std::string out = Tmp("try_booklet_fail.pdf");
+    PdfFileEditor ed;
+    EXPECT_FALSE(ed.TryMakeBooklet("non_existent_file.pdf", out));
+    EXPECT_FALSE(std::filesystem::exists(out));
+}
+
+TEST(PdfFileEditorOpsSmoke, TryResizeContentsFailureReturnsFalse) {
+    const std::string out = Tmp("try_resize_fail.pdf");
+    PdfFileEditor ed;
+    PdfFileEditor::ContentsResizeParameters params;
+    EXPECT_FALSE(ed.TryResizeContents("non_existent_file.pdf", out, {1}, params));
+    EXPECT_FALSE(std::filesystem::exists(out));
+}
+
+TEST(PdfFileEditorOpsSmoke, AddPageBreakHonestReturn) {
+    const std::string out = Tmp("pagebreak.pdf");
+    PdfFileEditor ed;
+    // Empty breaks is a safe no-op round-trip
+    EXPECT_TRUE(ed.AddPageBreak(HelloWorldPdf(), out, {}));
+    EXPECT_TRUE(std::filesystem::exists(out));
+    std::filesystem::remove(out);
+
+    // Non-empty breaks returns false because content stream splitting is not supported
+    PdfFileEditor::PageBreak pb{1, 100.0};
+    EXPECT_FALSE(ed.AddPageBreak(HelloWorldPdf(), out, {pb}));
+}
+

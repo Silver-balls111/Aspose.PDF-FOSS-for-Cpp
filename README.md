@@ -828,7 +828,7 @@ most-used entry points follows below it.
 - `Facades::PdfConverter` — rasterise a PDF to multi-page TIFF or per-page PNG
 - `Facades::PdfExtractor` — `StartPage`/`EndPage`-scoped text extraction, image enumeration, and embedded attachment extraction
 - `Facades::PdfBookmarkEditor` — `CreateBookmarkOfPage(title, pageNumber)`, XML export/import (`ExportBookmarksToXML`, `ImportBookmarksWithXML`), and HTML bookmark outline extraction
-- `Facades::PdfAnnotationEditor` — XFDF annotation import (Square, Circle, Text, Highlight), annotation content/author modification, and flattening
+- `Facades::PdfAnnotationEditor` — XFDF annotation import (Square, Circle, Text, Highlight, FreeText, Underline, StrikeOut, Line), annotation content/author modification, and flattening
 - `Facades::PdfContentEditor` — document embedded attachment adding/deletion, and page image resource replacement
 - `Facades::PdfFileInfo` — query page dimensions, rotation, PDF header version, and encryption state
 - `Facades::PdfPageEditor` — page geometry queries, rotation, resizing, and staged updates
@@ -836,7 +836,7 @@ most-used entry points follows below it.
 - `Facades::FormEditor` — AcroForm field creation, removal, field attributes/appearance flags, limits, alignment, choice list options, and field decoration
 - `Facades::PdfFileSignature` — detached PKCS#7 signing, signature verification, and signature removal (`RemoveSignature`/`RemoveSignatures`)
 - `Facades::PdfFileStamp` — `AddHeader(text, margin)`, `AddFooter(text, margin)`, `AddPageNumber(...)`, drawn as real text into each page
-- `Facades::PdfFileSecurity` — encrypt/decrypt/change passwords and set document privileges
+- `Facades::PdfFileSecurity` — encrypt/decrypt/change passwords
 - `Facades::PdfXmpMetadata` — XMP metadata registration and namespace management
 
 </details>

@@ -28,12 +28,18 @@ void PdfContentEditor::DeleteAttachments() {
     document_->EmbeddedFiles().Delete();
 }
 
+// ===== Document Actions (v1 stubs) =========================================
+
 void PdfContentEditor::AddDocumentAdditionalAction(const std::string&,
                                                    const std::string&) {}
 void PdfContentEditor::RemoveDocumentOpenAction() {}
 
+// ===== Viewer Preferences (v1 stubs) =======================================
+
 void PdfContentEditor::ChangeViewerPreference(int) {}
 int PdfContentEditor::GetViewerPreference() { return 0; }
+
+// ===== Image Operations (real) =============================================
 
 void PdfContentEditor::ReplaceImage(int pageNum, int imageNum, const std::string& fileName) {
     if (document_ == nullptr) return;
@@ -59,6 +65,8 @@ void PdfContentEditor::DeleteImage() {
     document_->DeleteImagesFromPage(0, {});  // every image on every page
 }
 
+// ===== Text Operations (real) ==============================================
+
 bool PdfContentEditor::ReplaceText(const std::string& srcText,
                                    const std::string& destText) {
     if (document_ == nullptr) return false;
@@ -74,6 +82,8 @@ bool PdfContentEditor::ReplaceText(const std::string& srcText,
     if (document_ == nullptr) return false;
     return document_->ReplaceTextInContent(srcText, destText, pageNum) > 0;
 }
+
+// ===== Stamp Operations (v1 stubs) =========================================
 
 void PdfContentEditor::DeleteStamp(int, const std::vector<int>&) {}
 void PdfContentEditor::DeleteStampByIds(const std::vector<int>&) {}

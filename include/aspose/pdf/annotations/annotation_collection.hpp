@@ -54,6 +54,7 @@ public:
     // does not transform the annotation's own Rect.
     void Add(Annotation& annotation, bool considerRotation);
     void Add(Annotation& annotation);
+    void Add(std::unique_ptr<Annotation> annotation, bool considerRotation = false);
 
     // Delete the annotation at `index`. Throws std::out_of_range
     // on bad index.
