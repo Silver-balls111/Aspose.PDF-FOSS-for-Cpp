@@ -865,6 +865,16 @@ Aspose.PDF FOSS for C++ is a v1 release and a deliberate subset of the commercia
 - `Permissions` set via encryption are enforced by the consuming PDF viewer, not by this library
   — the encryption bitfield is written into the file, but the library itself is not a DRM
   mechanism.
+- A few Facades methods remain deliberate v1 stubs: `FormEditor`'s action / submit setters
+  (`SetSubmitFlag`, `SetSubmitUrl`, `SetFieldScript`, `AddFieldScript`, `RemoveFieldAction`),
+  `PdfContentEditor`'s document-action, viewer-preference, and stamp-management methods,
+  `PdfFileSecurity`'s passwordless `SetPrivilege(DocumentPrivilege)` overload, and
+  `PdfFileSignature`'s usage-rights / LTV probes (`RemoveUsageRights`, `ContainsUsageRights`,
+  `IsLtvEnabled`). These return `false`, no-op, or safe defaults rather than pretending to
+  work.
+- `PdfFileEditor::AddPageBreak` splits pages with clip wrappers: each band page visually shows
+  only its region, but the underlying content stream (and its extractable text) is carried in
+  full on every band page, and annotations / outlines are not transferred to the split pages.
 
 These limitations don't apply to
 [Aspose.PDF for C++ — Enterprise Edition](https://products.aspose.com/pdf/cpp/), which adds full support for

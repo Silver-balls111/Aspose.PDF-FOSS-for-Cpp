@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include <aspose/pdf/annotations/annotation_type.hpp>
 #include <aspose/pdf/crypto_algorithm.hpp>
 #include <aspose/pdf/document_privilege.hpp>
 #include <aspose/pdf/permissions.hpp>
@@ -66,13 +67,16 @@ class LoadOptions;
 class PageCollection;
 
 namespace Annotations { class AnnotationCollection; }
+namespace Annotations { class Annotation; }
 namespace Annotations { class RedactionAnnotation; }
 namespace Forms { class Form; }
 namespace Facades { class PdfFileEditor; }
 namespace Facades { class PdfBookmarkEditor; }
+namespace Facades { class PdfAnnotationEditor; }
 namespace Facades { class PdfFileStamp; }
 namespace Facades { class PdfFileSignature; }
 namespace Facades { class PdfContentEditor; }
+namespace Facades { class PdfPageEditor; }
 namespace Facades { class PdfExtractor; }
 
 class Document {
@@ -359,6 +363,8 @@ private:
     friend class Aspose::Pdf::Facades::PdfFileStamp;
     friend class Aspose::Pdf::Facades::PdfFileSignature;
     friend class Aspose::Pdf::Facades::PdfContentEditor;
+    friend class Aspose::Pdf::Facades::PdfAnnotationEditor;
+    friend class Aspose::Pdf::Facades::PdfPageEditor;
     friend class Aspose::Pdf::Facades::PdfExtractor;
 
     // v1.1 metadata write-through. Builds the dirty list for an
@@ -718,6 +724,45 @@ private:
     int DeleteImagesFromPage(int pageNumber1BasedOr0,
                              const std::vector<int>& imageNumbers1Based);
 
+    // Transform content stream on a page by prepending
+    // `q [<clip re W n>] sx 0 0 sy dx dy cm` and appending `Q`. An optional
+    // clip rectangle (page space) constrains the drawing — backs
+    // PdfFileEditor::ResizeContents / AddMargins / AddPageBreak.
+    void TransformPageContent(std::size_t leafIndex, double sx, double sy,
+                              double dx, double dy,
+                              const Aspose::Pdf::Rectangle* clip = nullptr);
+
+    // Flatten annotations on a page into static content stream operators.
+    // Backs PdfAnnotationEditor::FlatteningAnnotations.
+    void FlattenPageAnnotations(std::size_t leafIndex,
+                                const std::vector<Annotations::AnnotationType>* filterTypes,
+                                bool applyRedactions);
+
+    // Import a page from another document as a /Subtype /Form XObject.
+    // Backs PdfFileEditor::MakeNUp imposition.
+    std::uint32_t ImportPageAsForm(const Document& src, int srcPage1Based,
+                                   double& outWidth, double& outHeight);
+
+    // Draw an imported Form XObject on a page: appends
+    // `q [<clip re W n>] sx 0 0 sy dx dy cm /<formName> Do Q` to the page
+    // /Contents and registers formId under formName in the page
+    // /Resources /XObject. `clip` (page-space rectangle) constrains the
+    // drawing — backs PdfFileEditor::MakeNUp imposition and AddPageBreak.
+    void DrawFormOnPage(std::size_t destLeaf, std::uint32_t formId,
+                        const std::string& formName, double sx, double sy,
+                        double dx, double dy,
+                        const Aspose::Pdf::Rectangle* clip = nullptr);
+
+    // Build the appearance-stream operator text for an annotation (the
+    // same recipes AppendAnnotationsUpdate uses for /AP /N bodies).
+    // Returns false for kinds without a generated appearance (sticky
+    // notes, links, file attachments). The resolved stroke colour (for
+    // /C) is reported through the out-params.
+    bool BuildAnnotationAppearance(
+        const Annotations::Annotation& a, std::string& outContent,
+        bool& needFont, bool& needExtGState,
+        double& outR, double& outG, double& outB) const;
+
     std::vector<std::byte> bytes_;
     std::optional<std::string> source_filename_;
     std::unique_ptr<foundation::pages_tree::Tree> tree_;
@@ -784,6 +829,42 @@ private:
         int alignment = 0;
     };
     std::vector<PendingRedaction> pending_redactions_;
+
+    struct PendingPageTransform {
+        std::size_t leaf = 0;
+        double sx = 1.0, sy = 1.0, dx = 0.0, dy = 0.0;
+        bool has_clip = false;
+        double cx0 = 0.0, cy0 = 0.0, cx1 = 0.0, cy1 = 0.0;
+    };
+    std::vector<PendingPageTransform> pending_page_transforms_;
+    bool page_transforms_dirty_ = false;
+
+    std::vector<std::byte> AppendPageTransformsUpdate(
+        const std::vector<std::byte>& working) const;
+
+    struct PendingFlattenForm {
+        std::string name;    // /XObject name used by the burn ops
+        std::string content; // appearance operators (page-absolute coords)
+        double llx = 0.0, lly = 0.0, urx = 0.0, ury = 0.0;  // /BBox
+        bool need_font = false;
+        bool need_extgstate = false;
+    };
+
+    struct PendingFlattenContent {
+        std::size_t leaf = 0;
+        std::string content;
+        std::vector<std::pair<std::string, std::uint32_t>> xobjects;
+        std::vector<PendingFlattenForm> forms;
+        // Annotation object ids whose /Annots refs must be dropped
+        // (burned / deleted / routed to the redaction path).
+        std::vector<std::uint32_t> drop_annot_ids;
+    };
+    std::vector<PendingFlattenContent> pending_flatten_contents_;
+    bool flatten_dirty_ = false;
+    int flatten_seq_ = 0;
+
+    std::vector<std::byte> AppendFlattenUpdate(
+        const std::vector<std::byte>& working) const;
 
     // Mutable: the public Outlines() tree is synced into the staged-write form
     // during the (const) Save() so it persists through AppendOutlinesUpdate.

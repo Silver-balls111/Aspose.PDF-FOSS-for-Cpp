@@ -1,6 +1,9 @@
 #include <aspose/pdf/facades/pdf_file_editor.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -170,7 +173,7 @@ CRP_ACCESSOR(ContentsHeight, contents_height_)
 // graph into the destination (Document::ImportPagesFrom); Extract /
 // Delete / Split reduce to PageCollection page removal. Each writes the
 // result via incremental update. Layout ops (booklet / n-up / resize /
-// margins) remain stubs below.
+// margins / page breaks) compose the same primitives below.
 
 namespace {
 
@@ -480,23 +483,137 @@ bool PdfFileEditor::TryMakeBooklet(const std::string& inputFile,
     return MakeBookletImpl(inputFile, outputFile, nullptr, true);
 }
 
+// ===== N-up imposition (real) ================================================
+// Each output sheet carries two source pages. Sheets are composed by
+// importing each source page as a Form XObject (Document::ImportPageAsForm)
+// and drawing it at its cell origin (Document::DrawFormOnPage), so the
+// source content, fonts and images survive as real PDF objects.
+
+bool PdfFileEditor::MakeNUpImpl(const std::vector<std::string>& inputFiles,
+                                const std::string& outputFile,
+                                bool pairwise, bool isSidewise,
+                                bool isTry) {
+    return RunEditor(
+        [&] {
+            if (inputFiles.empty())
+                throw std::runtime_error(
+                    "Aspose::Pdf::PdfFileEditor::MakeNUp: no input files");
+            if (pairwise && inputFiles.size() != 2)
+                throw std::runtime_error(
+                    "Aspose::Pdf::PdfFileEditor::MakeNUp: two input files "
+                    "required");
+
+            std::vector<Aspose::Pdf::Document> docs;
+            docs.reserve(inputFiles.size());
+            for (const auto& f : inputFiles) docs.emplace_back(f);
+
+            Aspose::Pdf::Document dest;
+
+            // Import a source page as a Form XObject; report its footprint.
+            auto import_cell = [&](Aspose::Pdf::Document& src, int page,
+                                   double& w, double& h)
+                -> std::pair<std::uint32_t, std::string> {
+                const std::uint32_t formId =
+                    dest.ImportPageAsForm(src, page, w, h);
+                return {formId, "Frm" + std::to_string(formId)};
+            };
+            auto draw_cell = [&](const std::pair<std::uint32_t,
+                                                 std::string>& form,
+                                 double dx, double dy) {
+                const std::size_t leaf =
+                    static_cast<std::size_t>(dest.Pages().Count()) - 1;
+                dest.DrawFormOnPage(leaf, form.first, form.second, 1.0, 1.0,
+                                    dx, dy);
+            };
+
+            if (pairwise) {
+                // Output page i joins page i of each input file side by
+                // side; the shorter input is padded with blank sheets.
+                const int n =
+                    std::max(static_cast<int>(docs[0].Pages().Count()),
+                             static_cast<int>(docs[1].Pages().Count()));
+                for (int i = 1; i <= n; ++i) {
+                    const bool has0 = i <= static_cast<int>(docs[0].Pages().Count());
+                    const bool has1 = i <= static_cast<int>(docs[1].Pages().Count());
+                    double w0 = 0.0, h0 = 0.0, w1 = 0.0, h1 = 0.0;
+                    const auto f0 = has0
+                        ? import_cell(docs[0], i, w0, h0)
+                        : std::pair<std::uint32_t, std::string>{};
+                    const auto f1 = has1
+                        ? import_cell(docs[1], i, w1, h1)
+                        : std::pair<std::uint32_t, std::string>{};
+                    const double sw = w0 + w1;
+                    const double sh = std::max(h0, h1);
+                    dest.AddPageInternal(0, false, 0, sw, sh);
+                    if (has0) draw_cell(f0, 0.0, 0.0);
+                    if (has1) draw_cell(f1, w0, 0.0);
+                }
+            } else {
+                // Sequential: source pages consumed in order, two per
+                // sheet. isSidewise stacks the cells vertically instead of
+                // placing them side by side.
+                struct Cell {
+                    std::size_t doc;
+                    int page;
+                };
+                std::vector<Cell> cells;
+                for (std::size_t d = 0; d < docs.size(); ++d)
+                    for (int p = 1;
+                         p <= static_cast<int>(docs[d].Pages().Count()); ++p)
+                        cells.push_back({d, p});
+                for (std::size_t i = 0; i < cells.size(); i += 2) {
+                    double wa = 0.0, ha = 0.0, wb = 0.0, hb = 0.0;
+                    const auto fa = import_cell(docs[cells[i].doc],
+                                                cells[i].page, wa, ha);
+                    const bool hasB = i + 1 < cells.size();
+                    const auto fb =
+                        hasB ? import_cell(docs[cells[i + 1].doc],
+                                           cells[i + 1].page, wb, hb)
+                             : std::pair<std::uint32_t, std::string>{};
+                    const double sw = isSidewise ? std::max(wa, wb) : wa + wb;
+                    const double sh = isSidewise ? ha + hb : std::max(ha, hb);
+                    dest.AddPageInternal(0, false, 0, sw, sh);
+                    draw_cell(fa, 0.0, 0.0);
+                    if (hasB)
+                        draw_cell(fb, isSidewise ? 0.0 : wa,
+                                  isSidewise ? ha : 0.0);
+                }
+            }
+            dest.Save(outputFile);
+        },
+        isTry, allow_concatenate_exceptions_);
+}
+
 bool PdfFileEditor::MakeNUp(const std::string& firstInputFile,
                             const std::string& secondInputFile,
                             const std::string& outputFile) {
-    return ConcatenateTwo(firstInputFile, secondInputFile, outputFile, false);
+    return MakeNUpImpl({firstInputFile, secondInputFile}, outputFile,
+                       /*pairwise=*/true, /*isSidewise=*/false,
+                       /*isTry=*/false);
 }
 
 bool PdfFileEditor::MakeNUp(const std::vector<std::string>& inputFiles,
                             const std::string& outputFile,
-                            bool /*isSidewise*/) {
-    return ConcatenateMany(inputFiles, outputFile, false);
+                            bool isSidewise) {
+    return MakeNUpImpl(inputFiles, outputFile, /*pairwise=*/false, isSidewise,
+                       /*isTry=*/false);
 }
 
 bool PdfFileEditor::TryMakeNUp(const std::string& firstInputFile,
                                const std::string& secondInputFile,
                                const std::string& outputFile) {
-    return ConcatenateTwo(firstInputFile, secondInputFile, outputFile, true);
+    return MakeNUpImpl({firstInputFile, secondInputFile}, outputFile,
+                       /*pairwise=*/true, /*isSidewise=*/false,
+                       /*isTry=*/true);
 }
+
+// ===== Contents resize / margins (real) ======================================
+// The page content is scaled with a `q <matrix> cm ... Q` wrapper
+// (Document::TransformPageContent): ResizeContents shrinks the content into
+// the new page box minus its margins, ResizeContentsPct shrinks the content
+// and centres it while the page box itself is left untouched, and
+// AddMargins grows the page box while translating the content to keep it
+// anchored at the new bottom-left origin.
 
 bool PdfFileEditor::ResizeContentsImpl(const std::string& inputFile,
                                        const std::string& outputFile,
@@ -511,19 +628,38 @@ bool PdfFileEditor::ResizeContentsImpl(const std::string& inputFile,
             if (p < 1 || p > count) continue;
             auto page = doc.Pages()[p];
             auto rect = page.Rect();
-            double w = rect.Width();
-            double h = rect.Height();
+            const double oldW = rect.Width();
+            const double oldH = rect.Height();
+            if (oldW <= 0.0 || oldH <= 0.0) continue;
+            double newW = oldW;
+            double newH = oldH;
             if (parameters.NewPageWidth().Value() > 0) {
-                w = parameters.NewPageWidth().IsPercent()
-                    ? (w * parameters.NewPageWidth().Value() / 100.0)
+                newW = parameters.NewPageWidth().IsPercent()
+                    ? (oldW * parameters.NewPageWidth().Value() / 100.0)
                     : parameters.NewPageWidth().Value();
             }
             if (parameters.NewPageHeight().Value() > 0) {
-                h = parameters.NewPageHeight().IsPercent()
-                    ? (h * parameters.NewPageHeight().Value() / 100.0)
+                newH = parameters.NewPageHeight().IsPercent()
+                    ? (oldH * parameters.NewPageHeight().Value() / 100.0)
                     : parameters.NewPageHeight().Value();
             }
-            page.SetPageSize(w, h);
+            auto margin = [](const ContentsResizeValue& v, double base) {
+                if (v.Value() <= 0.0) return 0.0;  // Auto / unset
+                return v.IsPercent() ? base * v.Value() / 100.0
+                                     : v.Value();
+            };
+            const double lm = margin(parameters.LeftMargin(), newW);
+            const double rm = margin(parameters.RightMargin(), newW);
+            const double bm = margin(parameters.BottomMargin(), newH);
+            const double tm = margin(parameters.TopMargin(), newH);
+            const double cw = newW - lm - rm;
+            const double ch = newH - bm - tm;
+            page.SetPageSize(newW, newH);
+            if (cw > 0.0 && ch > 0.0) {
+                doc.TransformPageContent(
+                    static_cast<std::size_t>(p - 1), cw / oldW, ch / oldH,
+                    lm, bm);
+            }
         }
         doc.Save(outputFile);
     }, isTry, allow_concatenate_exceptions_);
@@ -546,9 +682,16 @@ bool PdfFileEditor::ResizeContentsPct(const std::string& inputFile,
         for (int i = 1; i <= count; ++i) {
             auto page = doc.Pages()[i];
             auto rect = page.Rect();
-            double w = rect.Width() * (leftRightPct / 100.0);
-            double h = rect.Height() * (topBottomPct / 100.0);
-            page.SetPageSize(w, h);
+            const double w = rect.Width();
+            const double h = rect.Height();
+            if (w <= 0.0 || h <= 0.0) continue;
+            const double sx = leftRightPct / 100.0;
+            const double sy = topBottomPct / 100.0;
+            // The page box stays the same; the content shrinks to the
+            // requested percentage of the page and is centred.
+            doc.TransformPageContent(
+                static_cast<std::size_t>(i - 1), sx, sy,
+                w * (1.0 - sx) / 2.0, h * (1.0 - sy) / 2.0);
         }
         doc.Save(outputFile);
     }, false, allow_concatenate_exceptions_);
@@ -574,9 +717,14 @@ bool PdfFileEditor::AddMargins(const std::string& inputFile,
             if (p < 1 || p > count) continue;
             auto page = doc.Pages()[p];
             auto rect = page.Rect();
-            double w = rect.Width() + leftMargin + rightMargin;
-            double h = rect.Height() + topMargin + bottomMargin;
-            page.SetPageSize(w, h);
+            const double w = rect.Width();
+            const double h = rect.Height();
+            page.SetPageSize(w + leftMargin + rightMargin,
+                             h + topMargin + bottomMargin);
+            // Content moves with the enlarged bottom-left origin so the
+            // added left/bottom margins stay blank.
+            doc.TransformPageContent(static_cast<std::size_t>(p - 1), 1.0,
+                                     1.0, leftMargin, bottomMargin);
         }
         doc.Save(outputFile);
     }, false, allow_concatenate_exceptions_);
@@ -595,25 +743,90 @@ bool PdfFileEditor::AddMarginsPct(const std::string& inputFile,
             if (p < 1 || p > count) continue;
             auto page = doc.Pages()[p];
             auto rect = page.Rect();
-            double w = rect.Width() * (1.0 + (leftMargin + rightMargin) / 100.0);
-            double h = rect.Height() * (1.0 + (topMargin + bottomMargin) / 100.0);
-            page.SetPageSize(w, h);
+            const double w = rect.Width();
+            const double h = rect.Height();
+            const double lm = w * leftMargin / 100.0;
+            const double bm = h * bottomMargin / 100.0;
+            page.SetPageSize(w * (1.0 + (leftMargin + rightMargin) / 100.0),
+                             h * (1.0 + (topMargin + bottomMargin) / 100.0));
+            doc.TransformPageContent(static_cast<std::size_t>(p - 1), 1.0,
+                                     1.0, lm, bm);
         }
         doc.Save(outputFile);
     }, false, allow_concatenate_exceptions_);
 }
 
+// ===== Page breaks (real — clip-based split) =================================
+// A page with break positions is copied once per y-band (ImportPagesFrom)
+// and each copy's content is wrapped in `q <band> re W n … Q`
+// (TransformPageContent with a clip), so every band page shows only its
+// region while the full content streams — and their extractable text —
+// remain intact. v1 notes: annotations / outlines on the split pages are
+// not carried over, and each band page still carries the page's full text
+// in its content stream (clipping is visual).
+
 bool PdfFileEditor::AddPageBreak(const std::string& inputFile,
                                  const std::string& outputFile,
                                  const std::vector<PageBreak>& pageBreaks) {
-    if (pageBreaks.empty()) {
-        return RunEditor([&] {
-            Aspose::Pdf::Document doc(inputFile);
+    return RunEditor([&] {
+        Aspose::Pdf::Document doc(inputFile);
+        if (pageBreaks.empty()) {
             doc.Save(outputFile);
-        }, false, allow_concatenate_exceptions_);
-    }
-    // Vertical page breaking across content streams is not supported in v1 FOSS.
-    return false;
+            return;
+        }
+        std::map<int, std::vector<double>> cuts_by_page;
+        for (const auto& pb : pageBreaks)
+            if (pb.PageNumber() >= 1)
+                cuts_by_page[pb.PageNumber()].push_back(pb.Position());
+
+        Aspose::Pdf::Document dest;
+        const int count = static_cast<int>(doc.Pages().Count());
+        for (int p = 1; p <= count; ++p) {
+            auto it = cuts_by_page.find(p);
+            if (it == cuts_by_page.end()) {
+                dest.ImportPagesFrom(doc, {p}, 0);
+                continue;
+            }
+
+            const auto rect = doc.Pages()[p].Rect();
+            const double w = rect.Width();
+            const double h = rect.Height();
+            std::vector<double> cuts = it->second;
+            for (double& c : cuts) c = std::clamp(c, 0.0, h);
+            std::sort(cuts.begin(), cuts.end());
+            cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+            cuts.erase(std::remove_if(cuts.begin(), cuts.end(),
+                                      [h](double c) {
+                                          return c <= 0.0 || c >= h;
+                                      }),
+                       cuts.end());
+            if (cuts.empty()) {
+                dest.ImportPagesFrom(doc, {p}, 0);
+                continue;
+            }
+
+            // Bands from the top: [cut_k, cut_{k-1}], …, [0, cut_last].
+            // Pages are appended in order, so the leaf index of every
+            // previously staged clip stays valid.
+            double bottom = h;
+            for (auto b = cuts.rbegin(); b != cuts.rend(); ++b) {
+                dest.ImportPagesFrom(doc, {p}, 0);
+                const std::size_t leaf =
+                    static_cast<std::size_t>(dest.Pages().Count()) - 1;
+                const Aspose::Pdf::Rectangle clip(0.0, *b, w, bottom, false);
+                dest.TransformPageContent(leaf, 1.0, 1.0, 0.0, 0.0, &clip);
+                bottom = *b;
+            }
+            dest.ImportPagesFrom(doc, {p}, 0);
+            {
+                const std::size_t leaf =
+                    static_cast<std::size_t>(dest.Pages().Count()) - 1;
+                const Aspose::Pdf::Rectangle clip(0.0, 0.0, w, bottom, false);
+                dest.TransformPageContent(leaf, 1.0, 1.0, 0.0, 0.0, &clip);
+            }
+        }
+        dest.Save(outputFile);
+    }, false, allow_concatenate_exceptions_);
 }
 
 // ===== Properties — real storage =============================================

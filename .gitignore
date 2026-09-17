@@ -1,8 +1,10 @@
 build/
 build_release/
 build-rel/
+build-asan/
 .DS_Store
 .cache/
+.zcode/
 *.o
 *.a
 *.so

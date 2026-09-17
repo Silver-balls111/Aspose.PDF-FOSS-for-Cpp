@@ -5,10 +5,13 @@
 // attachment / text editor. Mirrors canonical
 // Aspose.Pdf.Facades.PdfContentEditor; extends SaveableFacade.
 //
-// v1 baseline: the content-edit + text-replace + link/annotation-create
-// render paths are not yet wired below the facade, so the operations are
-// surface-complete stubs (ReplaceText returns false; the void editors
-// no-op). The 6 document-action trigger constants are real.
+// v1 baseline: text replace routes through Document::ReplaceTextInContent
+// (real content-stream rewrite), attachments use EmbeddedFiles, and
+// ReplaceImage / DeleteImage edit the page /Resources /XObject images.
+// Still unsupported in v1 (no-ops / defaults): document additional
+// actions, viewer preferences, and the stamp-management methods —
+// stamps are one-shot content-stream writes with no persistent
+// identity for a by-id registry to target.
 //
 // The bulk of the canonical surface drops in cpp: every Create*/Draw*
 // overload routes through System.Drawing.Rectangle / System.Drawing.Color
@@ -61,7 +64,7 @@ public:
     void DeleteImage(int pageNum, const std::vector<int>& imageNum);
     void DeleteImage();
 
-    // ---- Text replace (v1 stubs) ----
+    // ---- Text replace (real — Document::ReplaceTextInContent) ----
     bool ReplaceText(const std::string& srcText, const std::string& destText);
     bool ReplaceText(const std::string& srcText, int pageNum,
                      const std::string& destText);

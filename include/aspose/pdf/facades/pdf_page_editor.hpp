@@ -2,14 +2,12 @@
 
 // =============================================================================
 // Aspose::Pdf::Facades::PdfPageEditor — page-level editor (move / rotate /
-// zoom / align pages + page transitions). Mirrors canonical
+// resize pages + page transitions). Mirrors canonical
 // Aspose.Pdf.Facades.PdfPageEditor; extends SaveableFacade.
 //
-// v1: GetPages reads the real page count; the transform operations
-// (MovePosition / Rotation / Zoom / alignment / transitions) are staged
-// into properties but ApplyChanges + per-page geometry are stubs — the
-// page content-transform + Page geometry (Rect/Rotate/CropBox) wiring is
-// deferred. GetPageSize / GetPageRotation return canonical defaults.
+// GetPages / GetPageSize / GetPageRotation query the bound document, and
+// ApplyChanges applies the staged rotation, page size, and MovePosition
+// content translation to the target pages (ProcessPages or all).
 //
 // Phased drops:
 //   * GetPageBoxSize (System.Drawing.Rectangle return) — Drawing.Rectangle
@@ -57,6 +55,9 @@ public:
     explicit PdfPageEditor(Aspose::Pdf::Document& document);
 
     void MovePosition(float offsetX, float offsetY);
+    // Translates page content by (offsetX, offsetY) via a `q 1 0 0 1 dx dy
+    // cm ... Q` content wrapper when ApplyChanges runs (applied together
+    // with the staged rotation / page size).
     // Number of pages in the bound document (real).
     int GetPages();
     // v1 returns the canonical US-Letter default; real per-page geometry
@@ -98,6 +99,8 @@ private:
     std::vector<int> process_pages_;
     int rotation_ = 0;
     float zoom_ = 1.0f;
+    float move_x_ = 0.0f;
+    float move_y_ = 0.0f;
     Aspose::Pdf::PageSize page_size_ = Aspose::Pdf::PageSize::PageLetter();
     AlignmentType alignment_ = AlignmentType::Left();
     Aspose::Pdf::HorizontalAlignment horizontal_alignment_ =

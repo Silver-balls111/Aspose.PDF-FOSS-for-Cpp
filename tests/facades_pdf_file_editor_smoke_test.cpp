@@ -155,8 +155,9 @@ TEST(FacadesPdfFileEditorSmoke, BadInputAndRemainingStubs) {
     // return false on a non-existent input (the load throws and the
     // throwing form swallows it, AllowConcatenateExceptions off);
     // SplitToPages/SplitToBulks surface the load failure. The layout ops
-    // (booklet / n-up / resize / margins) are still stubs returning
-    // false. Real behaviour is covered by the *_ops_smoke_test.
+    // (booklet / n-up / resize / margins) are real but equally return
+    // false on a load failure. Real behaviour is covered by the
+    // *_ops_smoke_test.
     PdfFileEditor editor;
     const std::vector<std::string> files{"a.pdf", "b.pdf"};
     const std::vector<int> pages{1, 2};
@@ -175,7 +176,8 @@ TEST(FacadesPdfFileEditorSmoke, BadInputAndRemainingStubs) {
     EXPECT_THROW((void)editor.SplitToBulks("a.pdf", {{1, 2}}),
                  std::exception);
 
-    // Still stubs (layout features deferred):
+    // Layout ops are real — on missing inputs they fail (return false)
+    // like every other operation here.
     EXPECT_FALSE(editor.MakeBooklet("a.pdf", "out.pdf"));
     EXPECT_FALSE(editor.MakeNUp("a.pdf", "b.pdf", "out.pdf"));
     EXPECT_FALSE(editor.ResizeContentsPct("a.pdf", "out.pdf", 50.0, 50.0));
