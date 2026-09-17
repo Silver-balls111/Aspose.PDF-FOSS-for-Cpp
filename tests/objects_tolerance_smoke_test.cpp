@@ -78,7 +78,11 @@ TEST(ObjectsToleranceSmoke, DuplicateKeyLastWins) {
 
 // A wrong direct /Length recovers the true body by scanning for endstream.
 TEST(ObjectsToleranceSmoke, WrongLengthScansForEndstream) {
-    const auto d = Parse(Pdf({"<< /Length 3 >>\nstream\nHELLOWORLD\nendstream"}));
+    // Keep the backing buffer alive: the parsed Stream's body is a
+    // non-owning span into it.
+    const auto pdf =
+        Pdf({"<< /Length 3 >>\nstream\nHELLOWORLD\nendstream"});
+    const auto d = Parse(pdf);
     const auto* o = Obj(d, 1);
     ASSERT_NE(o, nullptr);
     const auto* st = std::get_if<foundation::objects::Stream>(&o->value.v);
