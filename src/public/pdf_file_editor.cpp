@@ -439,7 +439,12 @@ bool PdfFileEditor::MakeBookletImpl(const std::string& inputFile,
         Aspose::Pdf::Document src(inputFile);
         const int count = static_cast<int>(src.Pages().Count());
         if (count == 0) return;
-        int total = ((count + 3) / 4) * 4;
+
+        // Half-fold booklet imposition. Pad to a multiple of 4, then
+        // emit (last, first, first+1, last-1) quadruples; each
+        // quadruple is one physical sheet — front face (last | first)
+        // and back face (first+1 | last-1).
+        const int total = ((count + 3) / 4) * 4;
         std::vector<int> booklet_order;
         int l = 1, r = total;
         while (l < r) {
@@ -450,17 +455,67 @@ bool PdfFileEditor::MakeBookletImpl(const std::string& inputFile,
             l += 2;
             r -= 2;
         }
+
+        // Blank padding halves keep the first page's footprint so every
+        // sheet stays printable even when fully blank.
+        const Aspose::Pdf::Rectangle firstRect = src.Pages()[1].Rect();
+        const double blankW = firstRect.Width();
+        const double blankH = firstRect.Height();
+
         Aspose::Pdf::Document dest;
-        for (int p : booklet_order) {
-            if (p <= count) {
-                dest.ImportPagesFrom(src, {p}, 0);
-            } else {
-                dest.Pages().Add();
+
+        // Import a source page as a Form XObject; report its footprint.
+        auto import_cell = [&](int page, double& w, double& h)
+            -> std::pair<std::uint32_t, std::string> {
+            const std::uint32_t formId =
+                dest.ImportPageAsForm(src, page, w, h);
+            return {formId, "Frm" + std::to_string(formId)};
+        };
+        auto draw_cell = [&](const std::pair<std::uint32_t,
+                                             std::string>& form,
+                             double sx, double sy, double dx, double dy) {
+            const std::size_t leaf =
+                static_cast<std::size_t>(dest.Pages().Count()) - 1;
+            dest.DrawFormOnPage(leaf, form.first, form.second, sx, sy,
+                                dx, dy);
+        };
+
+        for (std::size_t i = 0; i < booklet_order.size(); i += 2) {
+            const int halfPage[2] = {booklet_order[i], booklet_order[i + 1]};
+            const bool hasHalf[2] = {halfPage[0] <= count,
+                                     halfPage[1] <= count};
+            double w[2] = {blankW, blankW};
+            double h[2] = {blankH, blankH};
+            std::pair<std::uint32_t, std::string> form[2]{};
+            for (int c = 0; c < 2; ++c) {
+                if (hasHalf[c]) form[c] = import_cell(halfPage[c], w[c], h[c]);
             }
-        }
-        if (pageSize != nullptr) {
-            for (std::size_t i = 1; i <= dest.Pages().Count(); ++i) {
-                dest.Pages()[static_cast<int>(i)].SetPageSize(pageSize->Width(), pageSize->Height());
+
+            // Without an explicit page size each half keeps the source
+            // page's footprint and the sheet grows to hold both. With
+            // one, the halves are the requested booklet page size and
+            // each source page is scaled to fit and centred in its half.
+            const double sheetW = pageSize != nullptr
+                                      ? 2.0 * pageSize->Width()
+                                      : w[0] + w[1];
+            const double sheetH = pageSize != nullptr
+                                      ? pageSize->Height()
+                                      : std::max(h[0], h[1]);
+            dest.AddPageInternal(0, false, 0, sheetW, sheetH);
+
+            for (int c = 0; c < 2; ++c) {
+                if (!hasHalf[c]) continue;
+                double sx = 1.0, sy = 1.0;
+                double dx = (c == 0) ? 0.0 : w[0];
+                double dy = 0.0;
+                if (pageSize != nullptr) {
+                    const double W = pageSize->Width();
+                    const double H = pageSize->Height();
+                    sx = sy = std::min(W / w[c], H / h[c]);
+                    dx = static_cast<double>(c) * W + (W - w[c] * sx) / 2.0;
+                    dy = (H - h[c] * sy) / 2.0;
+                }
+                draw_cell(form[c], sx, sy, dx, dy);
             }
         }
         dest.Save(outputFile);

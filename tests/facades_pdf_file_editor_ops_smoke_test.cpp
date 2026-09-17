@@ -227,7 +227,78 @@ TEST(PdfFileEditorOpsSmoke, MakeBooklet) {
     PdfFileEditor ed;
     ASSERT_TRUE(ed.MakeBooklet(TwoPagesPdf(), out));
     Document re{out};
-    EXPECT_EQ(re.Pages().Count(), 4u);  // 2 pages rounded up to 4 for booklet
+    // Real half-fold imposition: 2 source pages pad to 4 booklet pages
+    // → 2 two-up sheets, not 4 reordered single pages.
+    ASSERT_EQ(re.Pages().Count(), 2u);
+    for (int p = 1; p <= 2; ++p) {
+        EXPECT_FLOAT_EQ(re.Pages()[p].Rect().Width(), 1224.0);
+        EXPECT_FLOAT_EQ(re.Pages()[p].Rect().Height(), 792.0);
+    }
+    // Each source page's content moved into a Form XObject.
+    EXPECT_TRUE(FormBodyContains(out, "Page one"));
+    EXPECT_TRUE(FormBodyContains(out, "Page two"));
+    // Booklet order [4,1,2,3]: sheet 1 = blank | page 1 (drawn at the
+    // right half origin), sheet 2 = page 2 | blank (drawn at 0,0).
+    const auto sheet1 = PageContentStreams(out, 1);
+    const auto sheet2 = PageContentStreams(out, 2);
+    ASSERT_GE(sheet1.size(), 1u);
+    ASSERT_GE(sheet2.size(), 1u);
+    std::string body1, body2;
+    for (const auto& s : sheet1) body1 += s;
+    for (const auto& s : sheet2) body2 += s;
+    EXPECT_NE(body1.find(" Do"), std::string::npos);
+    EXPECT_NE(body1.find("1.0000 0 0 1.0000 612.0000 0.0000 cm"),
+              std::string::npos);
+    EXPECT_NE(body2.find(" Do"), std::string::npos);
+    EXPECT_NE(body2.find("1.0000 0 0 1.0000 0.0000 0.0000 cm"),
+              std::string::npos);
+    std::filesystem::remove(out);
+}
+
+TEST(PdfFileEditorOpsSmoke, MakeBookletFourPagesTwoSheets) {
+    // Build a 4-page source (two_pages + two blanks).
+    const std::string src = Tmp("booklet_src4.pdf");
+    {
+        Document doc{TwoPagesPdf()};
+        doc.Pages().Add();
+        doc.Pages().Add();
+        doc.Save(src);
+    }
+    const std::string out = Tmp("booklet4.pdf");
+    PdfFileEditor ed;
+    ASSERT_TRUE(ed.MakeBooklet(src, out));
+    Document re{out};
+    // 4 pages → 2 two-up sheets: front face (4 | 1) + back face (2 | 3).
+    ASSERT_EQ(re.Pages().Count(), 2u);
+    for (int p = 1; p <= 2; ++p) {
+        EXPECT_FLOAT_EQ(re.Pages()[p].Rect().Width(), 1224.0);
+        EXPECT_FLOAT_EQ(re.Pages()[p].Rect().Height(), 792.0);
+    }
+    EXPECT_TRUE(FormBodyContains(out, "Page one"));
+    EXPECT_TRUE(FormBodyContains(out, "Page two"));
+    std::filesystem::remove(src);
+    std::filesystem::remove(out);
+}
+
+TEST(PdfFileEditorOpsSmoke, MakeBookletWithPageSize) {
+    const std::string out = Tmp("booklet_ps.pdf");
+    PdfFileEditor ed;
+    // The PageSize selects the booklet *half-page* size: Ledger halves
+    // (1224x792) → 2448x792 sheets; the 612x792 source pages scale by
+    // 1.0 and centre in their half (dx = 1224 + 306 = 1530 for the
+    // right half of sheet 1).
+    ASSERT_TRUE(ed.MakeBooklet(TwoPagesPdf(), out,
+                               Aspose::Pdf::PageSize::PageLedger()));
+    Document re{out};
+    ASSERT_EQ(re.Pages().Count(), 2u);
+    EXPECT_FLOAT_EQ(re.Pages()[1].Rect().Width(), 2448.0);
+    EXPECT_FLOAT_EQ(re.Pages()[1].Rect().Height(), 792.0);
+    const auto sheet1 = PageContentStreams(out, 1);
+    ASSERT_GE(sheet1.size(), 1u);
+    std::string body1;
+    for (const auto& s : sheet1) body1 += s;
+    EXPECT_NE(body1.find("1.0000 0 0 1.0000 1530.0000 0.0000 cm"),
+              std::string::npos);
     std::filesystem::remove(out);
 }
 

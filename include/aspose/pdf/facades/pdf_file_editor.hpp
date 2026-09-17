@@ -15,9 +15,11 @@
 //     and surfaces the exception through LastException.
 //
 // v1 baseline: the file-manipulation methods are real — Concatenate /
-// Append / Insert / Extract / Delete / Split / MakeBooklet deep-import or
-// remove pages through Document's incremental writer, MakeNUp performs
-// real 2-up imposition (two source pages per sheet via Form XObjects),
+// Append / Insert / Extract / Delete / Split deep-import or
+// remove pages through Document's incremental writer, MakeBooklet
+// performs real half-fold 2-up imposition (two source pages per sheet
+// via Form XObjects, in booklet order), MakeNUp performs real 2-up
+// imposition (two source pages per sheet via Form XObjects),
 // ResizeContents / ResizeContentsPct / AddMargins / AddMarginsPct scale
 // and translate page content via a content-stream matrix wrapper, and
 // AddPageBreak splits pages at the requested y positions (clip-based).
@@ -234,6 +236,12 @@ public:
 
     // ---- Booklet / N-Up ----
 
+    // Half-fold booklet imposition: output sheets carry two source pages
+    // side by side in booklet order (4 input pages → 2 sheets of
+    // 2×page-width × page-height). The PageSize overload selects the
+    // booklet *half-page* size — source pages are scaled to fit and
+    // centred in each half (e.g. PageSize.PageLetter booklet pages print
+    // on 1224×792 sheets).
     bool MakeBooklet(const std::string& inputFile,
                      const std::string& outputFile);
     bool MakeBooklet(const std::string& inputFile,
