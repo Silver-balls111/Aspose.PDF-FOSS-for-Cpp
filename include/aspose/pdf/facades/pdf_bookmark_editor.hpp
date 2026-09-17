@@ -6,12 +6,10 @@
 // export). Mirrors canonical Aspose.Pdf.Facades.PdfBookmarkEditor;
 // extends SaveableFacade.
 //
-// v1 baseline: every operation is a stub (Extract* returns an empty
-// Bookmarks; the rest are no-ops). The document outline (/Outlines)
-// read/write path is not yet in the foundation, so the actual bookmark
-// tree manipulation is deferred to the beat that lands outline support.
-// This beat ships the full public surface + the Bookmark / Bookmarks
-// value types.
+// Create/Extract/Delete/Modify are real (staged /Outlines write at
+// Save + readback via foundation::outlines). XML export/import
+// round-trip through a small line-oriented format with entity
+// escaping; HTML export writes a flat list.
 //
 // Phased drops:
 //   * CreateBookmarks(Color, bool, bool) — System.Drawing.Color cascade.
@@ -56,6 +54,10 @@ public:
 
     // ---- Import / Export ----
 
+    // dataDir is accepted for API parity (Aspose's input-data-location
+    // convention — callers pass the bound PDF's path/directory); it is
+    // NOT used as the output directory. The HTML file is always written
+    // to outputFile.
     void ExtractBookmarksToHTML(const std::string& dataDir,
                                 const std::string& outputFile);
     void ExportBookmarksToHtml(const std::string& dataDir,

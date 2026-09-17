@@ -5,6 +5,8 @@
 
 #include <aspose/pdf/document.hpp>
 
+#include "xml_text.hpp"
+
 namespace Aspose::Pdf::Facades {
 
 PdfBookmarkEditor::PdfBookmarkEditor(Aspose::Pdf::Document& document) {
@@ -13,8 +15,9 @@ PdfBookmarkEditor::PdfBookmarkEditor(Aspose::Pdf::Document& document) {
 
 // Outline create/extract are REAL — create stages an /Outlines tree on
 // the bound document (flushed at Save); extract parses the existing
-// /Outlines via foundation::outlines. HTML/XML import/export remain
-// stubs.
+// /Outlines via foundation::outlines. XML export/import round-trips
+// through a small line-oriented format with entity escaping; HTML
+// export writes a flat list.
 
 Aspose::Pdf::Document::OutlineNode PdfBookmarkEditor::ToNode(
         const Bookmark& bm) {
@@ -115,7 +118,7 @@ void PdfBookmarkEditor::ExportBookmarksToHtml(const std::string& /*dataDir*/,
     out << "<!DOCTYPE html>\n<html>\n<head><title>Bookmarks</title></head>\n<body>\n<ul>\n";
     for (const auto& bm : bms) {
         out << "  <li><a href=\"#page=" << bm.PageNumber() << "\">"
-            << bm.Title() << "</a></li>\n";
+            << foundation::xml_text::EscapeXmlText(bm.Title()) << "</a></li>\n";
     }
     out << "</ul>\n</body>\n</html>\n";
 }
@@ -129,7 +132,8 @@ void PdfBookmarkEditor::ExportBookmarksToXML(const std::string& outputFile) {
     out << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
     out << "<Bookmarks>\n";
     for (const auto& bm : bms) {
-        out << "  <Bookmark Title=\"" << bm.Title() << "\" Page=\""
+        out << "  <Bookmark Title=\""
+            << foundation::xml_text::EscapeXmlAttr(bm.Title()) << "\" Page=\""
             << bm.PageNumber() << "\" Level=\"" << bm.Level() << "\" />\n";
     }
     out << "</Bookmarks>\n";
@@ -138,29 +142,39 @@ void PdfBookmarkEditor::ExportBookmarksToXML(const std::string& outputFile) {
 void PdfBookmarkEditor::ImportBookmarksWithXML(const std::string& xmlFile) {
     std::ifstream in(xmlFile);
     if (!in.is_open()) return;
-    std::string line;
-    while (std::getline(in, line)) {
-        auto tagPos = line.find("<Bookmark");
-        if (tagPos == std::string::npos) continue;
-        auto titlePos = line.find("Title=\"", tagPos);
-        if (titlePos == std::string::npos) continue;
-        titlePos += 7;
-        auto titleEnd = line.find("\"", titlePos);
-        if (titleEnd == std::string::npos) continue;
-        std::string title = line.substr(titlePos, titleEnd - titlePos);
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
 
-        int pageNum = 1;
-        auto pagePos = line.find("Page=\"", tagPos);
-        if (pagePos != std::string::npos) {
-            pagePos += 6;
-            auto pageEnd = line.find("\"", pagePos);
-            if (pageEnd != std::string::npos) {
+    // Scan the whole buffer rather than lines, so externally produced or
+    // pretty-printed XML (where the <Bookmark> tag spans lines or carries
+    // attributes in any order) parses too. Values arrive entity-decoded.
+    std::size_t pos = 0;
+    while ((pos = content.find("<Bookmark", pos)) != std::string::npos) {
+        // Reject longer names that merely start with "Bookmark" (e.g. <Bookmarks>).
+        const char next = pos + 9 < content.size() ? content[pos + 9] : '\0';
+        if (next != ' ' && next != '>' && next != '/' && next != '\t' &&
+            next != '\n' && next != '\r') {
+            pos += 9;
+            continue;
+        }
+        const auto closePos = content.find('>', pos);
+        if (closePos == std::string::npos) break;
+        const std::string tagHeader = content.substr(pos, closePos - pos + 1);
+
+        const std::string title =
+            foundation::xml_text::FindAttrValue(tagHeader, "Title");
+        if (!title.empty()) {
+            int pageNum = 1;
+            const std::string pageStr =
+                foundation::xml_text::FindAttrValue(tagHeader, "Page");
+            if (!pageStr.empty()) {
                 try {
-                    pageNum = std::stoi(line.substr(pagePos, pageEnd - pagePos));
+                    pageNum = std::stoi(pageStr);
                 } catch (...) {}
             }
+            CreateBookmarkOfPage(title, pageNum);
         }
-        CreateBookmarkOfPage(title, pageNum);
+        pos = closePos + 1;
     }
 }
 

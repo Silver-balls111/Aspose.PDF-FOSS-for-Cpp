@@ -2,12 +2,14 @@
 // facades_pdf_bookmark_editor_smoke_test — beat Fa6 of the Facades
 // cluster. PdfBookmarkEditor + the Bookmark / Bookmarks value types.
 // Bookmark/Bookmarks are real value types; CreateBookmarks/Extract are
-// now REAL (parity gap 6) — staged /Outlines write at Save + readback
-// via foundation::outlines. HTML/XML import/export remain stubs.
+// REAL (parity gap 6) — staged /Outlines write at Save + readback
+// via foundation::outlines. XML export/import round-trip with entity
+// escaping; HTML export writes a flat list.
 // =============================================================================
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -118,7 +120,9 @@ TEST(FacadesBookmarkSmoke, ChildItemsRoundtrip) {
     EXPECT_EQ(parent.ChildItem().size(), 1u);
 }
 
-TEST(FacadesBookmarkSmoke, EditorStubsDoNotThrow) {
+// Full editor sweep: every call runs against a bound document, file
+// outputs land in the temp dir.
+TEST(FacadesBookmarkSmoke, EditorCallsDoNotThrow) {
     Document doc{HelloWorldPdf()};
     PdfBookmarkEditor editor{doc};
 
@@ -134,11 +138,120 @@ TEST(FacadesBookmarkSmoke, EditorStubsDoNotThrow) {
     editor.ModifyBookmarks("old", "new");
     editor.DeleteBookmarks("Intro");
     editor.DeleteBookmarks();
-    editor.ExportBookmarksToXML("out.xml");
-    editor.ImportBookmarksWithXML("in.xml");
-    editor.ExportBookmarksToHtml("dir", "out.html");
-    editor.ExtractBookmarksToHTML("dir", "out.html");
-    SUCCEED();
+
+    const std::string xml = BmTmp("sweep.xml");
+    const std::string html = BmTmp("sweep.html");
+    editor.ExportBookmarksToXML(xml);
+    editor.ImportBookmarksWithXML(BmTmp("missing_in.xml"));  // absent: no-op
+    // dataDir is parity-only (Aspose's input-data-location convention);
+    // the HTML always goes to the outputFile argument.
+    editor.ExportBookmarksToHtml("dir", html);
+    editor.ExtractBookmarksToHTML("dir", html);
+    EXPECT_TRUE(std::filesystem::exists(xml));
+    EXPECT_TRUE(std::filesystem::exists(html));
+    std::filesystem::remove(xml);
+    std::filesystem::remove(html);
+}
+
+// Titles containing XML metacharacters must escape on export and
+// survive the round-trip through ImportBookmarksWithXML intact
+// (regression for probe B1 — the old exporter wrote them raw).
+TEST(FacadesBookmarkSmoke, XmlEscapingRoundtrip) {
+    const std::string xml = BmTmp("escape.xml");
+    const std::string out = BmTmp("escape_out.pdf");
+    const std::string title = "Tom & Jerry \"quoted\" <tag>";
+    {
+        Document doc{TwoPagesPdf()};
+        PdfBookmarkEditor ed{doc};
+        ed.CreateBookmarkOfPage(title, 1);
+        ed.ExportBookmarksToXML(xml);
+    }
+    {
+        std::ifstream in(xml);
+        std::string content((std::istreambuf_iterator<char>(in)),
+                            std::istreambuf_iterator<char>());
+        EXPECT_NE(content.find(
+                      "Tom &amp; Jerry &quot;quoted&quot; &lt;tag&gt;"),
+                  std::string::npos)
+            << "exporter must escape the Title attribute";
+    }
+    {
+        Document doc{TwoPagesPdf()};
+        PdfBookmarkEditor ed{doc};
+        ed.ImportBookmarksWithXML(xml);
+        ed.Save(out);
+    }
+    Document re{out};
+    PdfBookmarkEditor ed3{re};
+    Bookmarks bms = ed3.ExtractBookmarks();
+    ASSERT_EQ(bms.size(), 1u);
+    EXPECT_EQ(bms[0].Title(), title);
+
+    std::filesystem::remove(xml);
+    std::filesystem::remove(out);
+}
+
+// Numeric character references beyond ASCII decode to UTF-8 on import
+// (regression for probe P10 — &#233; used to stay literal).
+TEST(FacadesBookmarkSmoke, XmlEntityDecodeOnImport) {
+    const std::string xml = BmTmp("entities.xml");
+    const std::string out = BmTmp("entities_out.pdf");
+    {
+        std::ofstream outXml(xml);
+        outXml << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+               << "<Bookmarks>\n"
+               << "  <Bookmark Title=\"Caf&#233; M&#xE9;tro\" Page=\"1\" "
+               << "Level=\"1\" />\n"
+               << "</Bookmarks>\n";
+    }
+    {
+        Document doc{TwoPagesPdf()};
+        PdfBookmarkEditor ed{doc};
+        ed.ImportBookmarksWithXML(xml);
+        ed.Save(out);
+    }
+    Document re{out};
+    PdfBookmarkEditor ed3{re};
+    Bookmarks bms = ed3.ExtractBookmarks();
+    ASSERT_EQ(bms.size(), 1u);
+    EXPECT_EQ(bms[0].Title(), "Caf\xC3\xA9 M\xC3\xA9tro");
+
+    std::filesystem::remove(xml);
+    std::filesystem::remove(out);
+}
+
+// Externally produced, pretty-printed XML (attributes in any order, a
+// tag spanning lines) imports too — the importer is not limited to its
+// own one-line-per-bookmark output format.
+TEST(FacadesBookmarkSmoke, ExternalPrettyPrintedXmlImports) {
+    const std::string xml = BmTmp("external.xml");
+    const std::string out = BmTmp("external_out.pdf");
+    {
+        std::ofstream outXml(xml);
+        outXml << "<?xml version=\"1.0\"?>\n"
+               << "<Bookmarks>\n"
+               << "  <Bookmark\n"
+               << "        Page=\"2\"\n"
+               << "        Level=\"1\"\n"
+               << "        Title=\"Second Page &amp; More\" />\n"
+               << "</Bookmarks>\n";
+    }
+    {
+        Document doc{TwoPagesPdf()};
+        PdfBookmarkEditor ed{doc};
+        ed.ImportBookmarksWithXML(xml);
+        ed.Save(out);
+    }
+    Document re{out};
+    PdfBookmarkEditor ed3{re};
+    Bookmarks bms = ed3.ExtractBookmarks();
+    ASSERT_EQ(bms.size(), 1u);
+    EXPECT_EQ(bms[0].Title(), "Second Page & More");
+    // PageNumber is deliberately not asserted: ExtractBookmarks reads
+    // only the outline titles/levels back, never destinations.
+
+    std::filesystem::remove(xml);
+    std::filesystem::remove(out);
 }
 
 TEST(FacadesBookmarkSmoke, ExtractReturnsEmptyBookmarks) {
