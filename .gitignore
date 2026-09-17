@@ -10,6 +10,11 @@ build-asan/
 *.so
 *.dylib
 
+# Test artifacts — the bookmark smoke tests once ran from the repo root
+# and wrote these into the CWD; tests now use the temp dir.
+/out.html
+/out.xml
+
 # Orchestrator / scanner state — regenerated on each run, must
 # not be committed. Empty .lock files are leftover process
 # locks; .working.json holds in-flight session scratch;
