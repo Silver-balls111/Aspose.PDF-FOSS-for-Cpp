@@ -226,6 +226,62 @@ TEST(FacadesPdfAnnotationEditorSmoke, UnboundDeleteIsSafe) {
     SUCCEED();
 }
 
+// Regression (probe P9b): the attribute lookup used to be a plain
+// substring search, so `page` matched inside `subpage="1"` and the
+// annotation landed on page 2 instead of page 1.
+TEST(FacadesPdfAnnotationEditorSmoke, XfdfSubpageAttributeDoesNotShadowPage) {
+    std::string xfdf = (std::filesystem::temp_directory_path() / "test_subpage.xfdf").string();
+    {
+        std::ofstream out(xfdf);
+        out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<xfdf xmlns=\"http://ns.adobe.com/xfdf/\">\n"
+            << "<annotations>\n"
+            << "  <square subpage=\"1\" page=\"0\" rect=\"10,20,110,34\" contents=\"On Page One\"/>\n"
+            << "</annotations>\n"
+            << "</xfdf>\n";
+    }
+
+    Document doc{HelloWorldPdf()};
+    doc.Pages().Add();
+    doc.Pages().Add();  // 3 pages total
+    PdfAnnotationEditor editor{doc};
+    editor.ImportAnnotationsFromXfdf(xfdf);
+
+    EXPECT_EQ(doc.Pages()[1].Annotations().Count(), 1);
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].Contents(), "On Page One");
+    EXPECT_EQ(doc.Pages()[2].Annotations().Count(), 0);
+    EXPECT_EQ(doc.Pages()[3].Annotations().Count(), 0);
+
+    std::filesystem::remove(xfdf);
+}
+
+// Regression (probe P10): numeric character references beyond ASCII were
+// emitted literally (&#233; stayed "&#233;") instead of becoming UTF-8.
+TEST(FacadesPdfAnnotationEditorSmoke, XfdfNumericEntitiesBeyondAscii) {
+    std::string xfdf = (std::filesystem::temp_directory_path() / "test_entities.xfdf").string();
+    {
+        std::ofstream out(xfdf);
+        out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            << "<xfdf xmlns=\"http://ns.adobe.com/xfdf/\">\n"
+            << "<annotations>\n"
+            << "  <square page=\"0\" rect=\"10,20,110,34\" title=\"Caf&#xE9; Corner\" contents=\"caf&#233;\"/>\n"
+            << "</annotations>\n"
+            << "</xfdf>\n";
+    }
+
+    Document doc{HelloWorldPdf()};
+    PdfAnnotationEditor editor{doc};
+    editor.ImportAnnotationsFromXfdf(xfdf);
+
+    ASSERT_EQ(doc.Pages()[1].Annotations().Count(), 1);
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].Contents(), "caf\xC3\xA9");
+    auto* ma = dynamic_cast<MarkupAnnotation*>(&doc.Pages()[1].Annotations()[0]);
+    ASSERT_NE(ma, nullptr);
+    EXPECT_EQ(ma->Title(), "Caf\xC3\xA9 Corner");
+
+    std::filesystem::remove(xfdf);
+}
+
 namespace {
 
 std::vector<std::byte> ReadPdfBytes(const std::string& path) {

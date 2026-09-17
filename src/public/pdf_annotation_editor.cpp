@@ -21,6 +21,8 @@
 #include <aspose/pdf/annotations/underline_annotation.hpp>
 #include <optional>
 
+#include "xml_text.hpp"
+
 namespace Aspose::Pdf::Facades {
 
 using namespace Aspose::Pdf::Annotations;
@@ -30,39 +32,6 @@ PdfAnnotationEditor::PdfAnnotationEditor(Aspose::Pdf::Document& document) {
 }
 
 namespace {
-
-std::string DecodeXmlEntities(const std::string& str) {
-    std::string out;
-    out.reserve(str.size());
-    for (size_t i = 0; i < str.size(); ++i) {
-        if (str[i] == '&') {
-            auto semi = str.find(';', i);
-            if (semi != std::string::npos && semi - i < 10) {
-                std::string ent = str.substr(i + 1, semi - i - 1);
-                if (ent == "amp") { out += '&'; i = semi; continue; }
-                if (ent == "lt") { out += '<'; i = semi; continue; }
-                if (ent == "gt") { out += '>'; i = semi; continue; }
-                if (ent == "quot") { out += '"'; i = semi; continue; }
-                if (ent == "apos") { out += '\''; i = semi; continue; }
-                if (!ent.empty() && ent[0] == '#') {
-                    int code = 0;
-                    if (ent.size() > 1 && (ent[1] == 'x' || ent[1] == 'X')) {
-                        try { code = std::stoi(ent.substr(2), nullptr, 16); } catch (...) {}
-                    } else {
-                        try { code = std::stoi(ent.substr(1)); } catch (...) {}
-                    }
-                    if (code > 0 && code < 128) {
-                        out += static_cast<char>(code);
-                        i = semi;
-                        continue;
-                    }
-                }
-            }
-        }
-        out += str[i];
-    }
-    return out;
-}
 
 std::optional<Rectangle> ParseRect(const std::string& str) {
     if (str.empty()) return std::nullopt;
@@ -80,22 +49,6 @@ std::optional<Rectangle> ParseRect(const std::string& str) {
         return Rectangle(vals[0], vals[1], vals[2], vals[3], true);
     }
     return std::nullopt;
-}
-
-std::string GetAttr(const std::string& tag, const std::string& attrName) {
-    auto pos = tag.find(attrName + "=\"");
-    if (pos == std::string::npos) {
-        pos = tag.find(attrName + "='");
-        if (pos == std::string::npos) return "";
-        pos += attrName.size() + 2;
-        auto end = tag.find("'", pos);
-        if (end == std::string::npos) return "";
-        return DecodeXmlEntities(tag.substr(pos, end - pos));
-    }
-    pos += attrName.size() + 2;
-    auto end = tag.find("\"", pos);
-    if (end == std::string::npos) return "";
-    return DecodeXmlEntities(tag.substr(pos, end - pos));
 }
 
 }  // namespace
@@ -150,21 +103,22 @@ void PdfAnnotationEditor::ImportAnnotationFromXfdf(
             std::string tagHeader = content.substr(pos, closePos - pos + 1);
 
             int page = 0;
-            std::string pageStr = GetAttr(tagHeader, "page");
+            std::string pageStr = foundation::xml_text::FindAttrValue(tagHeader, "page");
             if (!pageStr.empty()) {
                 try { page = std::stoi(pageStr); } catch (...) {}
             }
             int pageNum = page + 1; // XFDF is 0-based, Aspose is 1-based
             if (pageNum < 1 || pageNum > pageCount) pageNum = 1;
 
-            auto rectOpt = ParseRect(GetAttr(tagHeader, "rect"));
+            auto rectOpt = ParseRect(
+                foundation::xml_text::FindAttrValue(tagHeader, "rect"));
             if (!rectOpt.has_value()) {
                 pos = closePos + 1;
                 continue;
             }
             Rectangle rect = *rectOpt;
-            std::string title = GetAttr(tagHeader, "title");
-            std::string contents = GetAttr(tagHeader, "contents");
+            std::string title = foundation::xml_text::FindAttrValue(tagHeader, "title");
+            std::string contents = foundation::xml_text::FindAttrValue(tagHeader, "contents");
 
             bool isSelfClosing = (closePos > 0 && content[closePos - 1] == '/');
             if (!isSelfClosing) {
@@ -177,7 +131,8 @@ void PdfAnnotationEditor::ImportAnnotationFromXfdf(
                         cstart += 10;
                         auto cend = body.find("</contents>", cstart);
                         if (cend != std::string::npos) {
-                            contents = DecodeXmlEntities(body.substr(cstart, cend - cstart));
+                            contents = foundation::xml_text::DecodeXmlEntities(
+                                body.substr(cstart, cend - cstart));
                         }
                     } else {
                         auto rstart = body.find("<contents-richtext>");
@@ -185,7 +140,8 @@ void PdfAnnotationEditor::ImportAnnotationFromXfdf(
                             rstart += 19;
                             auto rend = body.find("</contents-richtext>", rstart);
                             if (rend != std::string::npos) {
-                                contents = DecodeXmlEntities(body.substr(rstart, rend - rstart));
+                                contents = foundation::xml_text::DecodeXmlEntities(
+                                    body.substr(rstart, rend - rstart));
                             }
                         }
                     }
