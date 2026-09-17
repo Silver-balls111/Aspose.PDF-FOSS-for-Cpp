@@ -683,7 +683,7 @@ most-used entry points follows below it.
 | `Facade` | Facade.BindPdf overloads accept either a file path string (srcFile) or an existing `Aspose::Pdf::Document` (srcDoc) to load PDF content. |
 | `FormEditor` | Class with 53 methods. |
 | `FormFieldFacade` | Class with 30 methods and 26 properties. |
-| `PdfAnnotationEditor` | PdfAnnotationEditor can import annotations from FDF or XFDF files and flatten them into the page content, removing interactive elements. |
+| `PdfAnnotationEditor` | PdfAnnotationEditor can import annotations from XFDF files and flatten them into the page content, removing interactive elements (FDF import is not supported in v1). |
 | `PdfBookmarkEditor` | PdfBookmarkEditor.CreateBookmarkOfPage(title, pageNumber) adds a new bookmark that points to the specified page. |
 | `PdfContentEditor` | PdfContentEditor.ReplaceText(srcText, destText) searches the entire document and replaces matching strings, returning true when at least one replacement occurs. |
 | `PdfConverter` | Class with 37 methods. |
@@ -868,10 +868,17 @@ Aspose.PDF FOSS for C++ is a v1 release and a deliberate subset of the commercia
 - A few Facades methods remain deliberate v1 stubs: `FormEditor`'s action / submit setters
   (`SetSubmitFlag`, `SetSubmitUrl`, `SetFieldScript`, `AddFieldScript`, `RemoveFieldAction`),
   `PdfContentEditor`'s document-action, viewer-preference, and stamp-management methods,
-  `PdfFileSecurity`'s passwordless `SetPrivilege(DocumentPrivilege)` overload, and
-  `PdfFileSignature`'s usage-rights / LTV probes (`RemoveUsageRights`, `ContainsUsageRights`,
-  `IsLtvEnabled`). These return `false`, no-op, or safe defaults rather than pretending to
-  work.
+  `PdfAnnotationEditor`'s `ImportAnnotationsFromFdf` (FDF uses PDF COS syntax rather than XML;
+  use the XFDF import instead), `PdfFileSecurity`'s passwordless
+  `SetPrivilege(DocumentPrivilege)` overload, and `PdfFileSignature`'s usage-rights / LTV probes
+  (`RemoveUsageRights`, `ContainsUsageRights`, `IsLtvEnabled`). These return `false`, no-op, or
+  safe defaults rather than pretending to work.
+- `PdfAnnotationEditor::FlatteningAnnotations(FlattenSettings&)` ignores its settings toggles —
+  every annotation is burned into the page content and removed, exactly like the no-argument
+  overload.
+- `PdfFileEditor::MakeBooklet` composes each sheet from the source pages' persisted bytes (Form
+  XObjects): annotations staged in memory but not yet saved to the input file are not carried
+  over — the same caveat as `MakeNUp`.
 - `PdfFileEditor::AddPageBreak` splits pages with clip wrappers: each band page visually shows
   only its region, but the underlying content stream (and its extractable text) is carried in
   full on every band page, and annotations / outlines are not transferred to the split pages.
