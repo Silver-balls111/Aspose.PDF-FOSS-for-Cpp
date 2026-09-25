@@ -87,7 +87,7 @@ public:
     int GetRevision(const SignatureName& sigName);
     int GetTotalRevision();
 
-    // ---- Remove (v1: no-op — needs revision rewrite) ----
+    // ---- Remove (real — removes signature fields from AcroForm) ----
 
     void RemoveUsageRights();
     void RemoveSignature(const std::string& sigName);

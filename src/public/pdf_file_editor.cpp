@@ -538,6 +538,12 @@ bool PdfFileEditor::TryMakeBooklet(const std::string& inputFile,
     return MakeBookletImpl(inputFile, outputFile, nullptr, true);
 }
 
+bool PdfFileEditor::TryMakeBooklet(const std::string& inputFile,
+                                   const std::string& outputFile,
+                                   Aspose::Pdf::PageSize pageSize) {
+    return MakeBookletImpl(inputFile, outputFile, &pageSize, true);
+}
+
 // ===== N-up imposition (real) ================================================
 // Each output sheet carries two source pages. Sheets are composed by
 // importing each source page as a Form XObject (Document::ImportPageAsForm)
@@ -659,6 +665,13 @@ bool PdfFileEditor::TryMakeNUp(const std::string& firstInputFile,
                                const std::string& outputFile) {
     return MakeNUpImpl({firstInputFile, secondInputFile}, outputFile,
                        /*pairwise=*/true, /*isSidewise=*/false,
+                       /*isTry=*/true);
+}
+
+bool PdfFileEditor::TryMakeNUp(const std::vector<std::string>& inputFiles,
+                               const std::string& outputFile,
+                               bool isSidewise) {
+    return MakeNUpImpl(inputFiles, outputFile, /*pairwise=*/false, isSidewise,
                        /*isTry=*/true);
 }
 

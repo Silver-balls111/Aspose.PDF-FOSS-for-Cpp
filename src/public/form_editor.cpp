@@ -30,8 +30,12 @@ std::unique_ptr<Aspose::Pdf::Forms::Field> MakeField(
     using namespace Aspose::Pdf::Forms;
     switch (type) {
         case FieldType::Text:
-        case FieldType::MultiLineText:
             return std::make_unique<TextBoxField>(doc, rect);
+        case FieldType::MultiLineText: {
+            auto tb = std::make_unique<TextBoxField>(doc, rect);
+            tb->Multiline(true);
+            return tb;
+        }
         case FieldType::ComboBox:
             return std::make_unique<ComboBoxField>(doc, rect);
         case FieldType::ListBox:
@@ -293,16 +297,7 @@ void FormEditor::ResetInnerFacade() { facade_.Reset(); }
 
 void FormEditor::CopyInnerField(const std::string& fieldName,
                                 const std::string& newFieldName, int pageNum) {
-    Aspose::Pdf::Document* doc = EnsureDoc();
-    if (doc == nullptr) return;
-    auto* annot = doc->Form()[fieldName];
-    if (annot == nullptr) return;
-    auto rect = annot->Rect();
-    auto field = MakeField(FieldType::Text, *doc, rect);
-    if (field) {
-        doc->Form().Add(*field, newFieldName, pageNum);
-        owned_fields_.push_back(std::move(field));
-    }
+    CopyInnerField(fieldName, newFieldName, pageNum, 0.0f, 0.0f);
 }
 
 void FormEditor::CopyInnerField(const std::string& fieldName,
@@ -316,7 +311,20 @@ void FormEditor::CopyInnerField(const std::string& fieldName,
     Aspose::Pdf::Rectangle offset_rect(
         rect.LLX() + offsetX, rect.LLY() + offsetY,
         rect.URX() + offsetX, rect.URY() + offsetY, true);
-    auto field = MakeField(FieldType::Text, *doc, offset_rect);
+    FieldType ft = FieldType::Text;
+    if (dynamic_cast<Forms::CheckboxField*>(annot)) ft = FieldType::CheckBox;
+    else if (dynamic_cast<Forms::ComboBoxField*>(annot)) ft = FieldType::ComboBox;
+    else if (dynamic_cast<Forms::ListBoxField*>(annot)) ft = FieldType::ListBox;
+    else if (dynamic_cast<Forms::RadioButtonField*>(annot)) ft = FieldType::Radio;
+    else if (dynamic_cast<Forms::ButtonField*>(annot)) ft = FieldType::PushButton;
+    else if (dynamic_cast<Forms::BarcodeField*>(annot)) ft = FieldType::Barcode;
+    else if (dynamic_cast<Forms::SignatureField*>(annot)) ft = FieldType::Signature;
+    else if (dynamic_cast<Forms::NumberField*>(annot)) ft = FieldType::Numeric;
+    else if (dynamic_cast<Forms::DateField*>(annot)) ft = FieldType::DateTime;
+    else if (auto* tb = dynamic_cast<Forms::TextBoxField*>(annot)) {
+        ft = tb->Multiline() ? FieldType::MultiLineText : FieldType::Text;
+    }
+    auto field = MakeField(ft, *doc, offset_rect);
     if (field) {
         doc->Form().Add(*field, newFieldName, pageNum);
         owned_fields_.push_back(std::move(field));

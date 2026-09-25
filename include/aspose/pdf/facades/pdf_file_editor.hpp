@@ -249,6 +249,9 @@ public:
                      Aspose::Pdf::PageSize pageSize);
     bool TryMakeBooklet(const std::string& inputFile,
                         const std::string& outputFile);
+    bool TryMakeBooklet(const std::string& inputFile,
+                        const std::string& outputFile,
+                        Aspose::Pdf::PageSize pageSize);
 
     bool MakeNUp(const std::string& firstInputFile,
                  const std::string& secondInputFile,
@@ -258,6 +261,8 @@ public:
     bool TryMakeNUp(const std::string& firstInputFile,
                     const std::string& secondInputFile,
                     const std::string& outputFile);
+    bool TryMakeNUp(const std::vector<std::string>& inputFiles,
+                    const std::string& outputFile, bool isSidewise);
 
     // ---- Resize ----
 

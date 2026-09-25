@@ -11,9 +11,8 @@
 //     document through the foundation TextAbsorber, honouring the
 //     StartPage / EndPage range. Whole-document text and the
 //     per-page cursor are both backed by a single extraction pass.
-//   * Image + attachment extraction are v1 stubs (return false /
-//     empty / no-op). The pixel-level image decode + /EmbeddedFile
-//     stream plumbing land in follow-on beats.
+//   * Image extraction is REAL (iterates image XObjects via Document).
+//   * Attachment extraction is REAL (reads /EmbeddedFiles via Document).
 //
 // Phased drops:
 //   * Every Stream-based overload (GetText(Stream) / GetNextPageText
@@ -50,6 +49,7 @@ public:
 
     // Re-expose the inherited BindPdf(file) / BindPdf(Document&)
     // overloads so callers can rebind without ambiguity.
+    void BindPdf(const std::string& srcFile) override;
     using Facade::BindPdf;
 
     // ---- Text extraction (real) ----
@@ -69,7 +69,7 @@ public:
     // Write the next page's text to a file and advance the cursor.
     void GetNextPageText(const std::string& outputFile);
 
-    // ---- Image extraction (v1 stubs) ----
+    // ---- Image extraction (real) ----
 
     void ExtractImage();
     bool HasNextImage();

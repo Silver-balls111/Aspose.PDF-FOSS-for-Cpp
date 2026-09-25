@@ -9,12 +9,14 @@
 // v1 capabilities:
 //   * Deletion is REAL — DeleteAnnotations() clears every page's
 //     annotation collection; DeleteAnnotation(name) removes the
-//     uniquely-named annotation. Both run through the foundation
-//     AnnotationCollection on each Page.
-//   * Import (XFDF / FDF), export, modify, flatten, redact and
-//     delete-by-subtype are v1 stubs — the XFDF/FDF serialisation
-//     foundation + the annotation-flatten render path land in
-//     follow-on beats.
+//     uniquely-named annotation; DeleteAnnotations(type) deletes by
+//     canonical type name.
+//   * Import (XFDF) is REAL — imports supported annotation subtypes
+//     from XFDF files with XML entity decoding and type filtering.
+//   * Modify is REAL — ModifyAnnotations and ModifyAnnotationsAuthor.
+//   * Flattening is REAL — burns annotation appearances into static
+//     page content streams.
+//   * Import (FDF) is a deliberate stub (FDF uses PDF COS syntax).
 //
 // Phased drops:
 //   * Every Stream-based overload (Import/Export with a Stream or
@@ -82,8 +84,7 @@ public:
 
     // Clear every page's annotation collection (real).
     void DeleteAnnotations();
-    // Delete annotations of the given subtype name (v1 stub —
-    // needs the AnnotationType<->/Subtype name table).
+    // Delete annotations of the given subtype name (real).
     void DeleteAnnotations(const std::string& annotType);
     // Delete the uniquely-named annotation across all pages (real).
     void DeleteAnnotation(const std::string& annotName);

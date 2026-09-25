@@ -25,6 +25,14 @@ PdfExtractor::PdfExtractor(Aspose::Pdf::Document& document) {
     BindPdf(document);
 }
 
+void PdfExtractor::BindPdf(const std::string& srcFile) {
+    if (!password_.empty()) {
+        Facade::BindPdf(srcFile, password_);
+    } else {
+        Facade::BindPdf(srcFile);
+    }
+}
+
 // ===== Text extraction =======================================================
 
 void PdfExtractor::EnsureExtracted() {
@@ -102,10 +110,7 @@ bool PdfExtractor::GetNextImage(const std::string& outputFile) {
     return ok;
 }
 
-// ===== Attachment extraction — v1 stubs ======================================
-// /EmbeddedFile stream extraction lands with embedded-file plumbing
-// (the same beat that wires FileSpecification stream contents through
-// PdfWriter). The surface returns the "no attachments" contract.
+// ===== Attachment extraction (real — via Document::EmbeddedFiles) ============
 
 std::vector<std::string> PdfExtractor::GetAttachNames() {
     if (document_ == nullptr) return {};

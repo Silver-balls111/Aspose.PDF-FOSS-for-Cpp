@@ -14,6 +14,7 @@
 #include <aspose/pdf/annotations/annotation_collection.hpp>
 #include <aspose/pdf/annotations/annotation_type.hpp>
 #include <aspose/pdf/annotations/circle_annotation.hpp>
+#include <aspose/pdf/annotations/square_annotation.hpp>
 #include <aspose/pdf/annotations/text_annotation.hpp>
 #include <aspose/pdf/document.hpp>
 #include <aspose/pdf/facades/pdf_annotation_editor.hpp>
@@ -412,3 +413,23 @@ TEST(FacadesPdfAnnotationEditorSmoke, FlattenBurnsAppearanceIntoPageContent) {
 
     std::filesystem::remove(out);
 }
+
+TEST(FacadesPdfAnnotationEditorSmoke, DeleteAnnotationsBySubtypeName) {
+    Document doc{HelloWorldPdf()};
+    SquareAnnotation sq{doc};
+    sq.Name("my_square");
+    TextAnnotation tx{doc};
+    tx.Name("my_text");
+
+    doc.Pages()[1].Annotations().Add(sq);
+    doc.Pages()[1].Annotations().Add(tx);
+    ASSERT_EQ(doc.Pages()[1].Annotations().Count(), 2);
+
+    PdfAnnotationEditor editor{doc};
+    editor.DeleteAnnotations("Square");
+
+    ASSERT_EQ(doc.Pages()[1].Annotations().Count(), 1);
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].Name(), "my_text");
+    EXPECT_EQ(doc.Pages()[1].Annotations()[0].AnnotationType(), AnnotationType::Text);
+}
+

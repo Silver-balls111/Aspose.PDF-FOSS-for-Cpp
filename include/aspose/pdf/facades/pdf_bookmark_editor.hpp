@@ -50,6 +50,7 @@ public:
     Bookmarks ExtractBookmarks();
     Bookmarks ExtractBookmarks(bool keepLevels);
     Bookmarks ExtractBookmarks(const std::string& title);
+    Bookmarks ExtractBookmarks(const char* title);
     Bookmarks ExtractBookmarks(const Bookmark& parent);
 
     // ---- Import / Export ----

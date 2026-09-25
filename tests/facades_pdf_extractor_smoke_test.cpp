@@ -168,3 +168,19 @@ TEST(FacadesPdfExtractorSmoke, AttachmentExtractionReal) {
     std::filesystem::remove(extractedOut);
 }
 
+TEST(FacadesPdfExtractorSmoke, EncryptedPdfWithPasswordExtractsText) {
+    const std::string encPath = (std::filesystem::path(__FILE__).parent_path() /
+                                 "fixtures" / "encrypt_parser" / "user_pwd_aes128.pdf").string();
+    PdfExtractor ex;
+    ex.Password("user");
+    ex.BindPdf(encPath);
+
+    const std::string out = TempOut("extracted_enc.txt");
+    ex.ExtractText();
+    ex.GetText(out);
+
+    ASSERT_TRUE(std::filesystem::exists(out));
+    std::filesystem::remove(out);
+}
+
+

@@ -155,3 +155,14 @@ TEST(FacadesPdfFileInfoSmoke, UseStrictValidationFlag) {
     info.UseStrictValidation(true);
     EXPECT_TRUE(info.UseStrictValidation());
 }
+
+TEST(FacadesPdfFileInfoSmoke, BindEncryptedPdfWithPassword) {
+    const std::string encPath = (std::filesystem::path(__FILE__).parent_path() /
+                                 "fixtures" / "encrypt_parser" / "user_pwd_aes128.pdf").string();
+    PdfFileInfo info(encPath, "user");
+    EXPECT_TRUE(info.IsPdfFile());
+    EXPECT_TRUE(info.IsEncrypted());
+    EXPECT_EQ(info.NumberOfPages(), 1);
+    EXPECT_EQ(info.GetPdfVersion(), "1.6");
+}
+

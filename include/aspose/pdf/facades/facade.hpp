@@ -28,6 +28,7 @@ public:
     // ---- IFacade ----
 
     void BindPdf(const std::string& srcFile) override;
+    void BindPdf(const std::string& srcFile, const std::string& password);
     void BindPdf(Aspose::Pdf::Document& srcDoc) override;
     void Close() override;
 

@@ -93,14 +93,57 @@ Bookmarks PdfBookmarkEditor::ExtractBookmarks() {
     }
     return result;
 }
-Bookmarks PdfBookmarkEditor::ExtractBookmarks(bool) {
-    return ExtractBookmarks();
+Bookmarks PdfBookmarkEditor::ExtractBookmarks(bool keepLevels) {
+    if (keepLevels) return ExtractBookmarks();
+    Bookmarks all = ExtractBookmarks();
+    Bookmarks result;
+    for (auto& b : all) {
+        if (b.Level() == 1) {
+            result.push_back(std::move(b));
+        }
+    }
+    return result;
 }
-Bookmarks PdfBookmarkEditor::ExtractBookmarks(const std::string&) {
-    return ExtractBookmarks();
+
+Bookmarks PdfBookmarkEditor::ExtractBookmarks(const std::string& title) {
+    Bookmarks all = ExtractBookmarks();
+    Bookmarks result;
+    for (auto& b : all) {
+        if (b.Title() == title) {
+            result.push_back(std::move(b));
+        }
+    }
+    return result;
 }
-Bookmarks PdfBookmarkEditor::ExtractBookmarks(const Bookmark&) {
-    return ExtractBookmarks();
+
+Bookmarks PdfBookmarkEditor::ExtractBookmarks(const char* title) {
+    return ExtractBookmarks(title != nullptr ? std::string(title) : std::string{});
+}
+
+
+Bookmarks PdfBookmarkEditor::ExtractBookmarks(const Bookmark& parent) {
+    Bookmarks all = ExtractBookmarks();
+    Bookmarks result;
+    if (parent.Title().empty()) return result;
+    bool collecting = false;
+    int parentLevel = parent.Level();
+    for (const auto& b : all) {
+        if (!collecting) {
+            if (b.Title() == parent.Title()) {
+                collecting = true;
+                parentLevel = b.Level();
+            }
+        } else {
+            if (b.Level() > parentLevel) {
+                if (b.Level() == parentLevel + 1) {
+                    result.push_back(b);
+                }
+            } else {
+                break;
+            }
+        }
+    }
+    return result;
 }
 
 void PdfBookmarkEditor::ExtractBookmarksToHTML(const std::string& dataDir,

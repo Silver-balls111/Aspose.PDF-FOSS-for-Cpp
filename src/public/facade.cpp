@@ -12,6 +12,12 @@ void Facade::BindPdf(const std::string& srcFile) {
     document_ = owned_.get();
 }
 
+void Facade::BindPdf(const std::string& srcFile, const std::string& password) {
+    Close();
+    owned_ = std::make_unique<Aspose::Pdf::Document>(srcFile, password);
+    document_ = owned_.get();
+}
+
 void Facade::BindPdf(Aspose::Pdf::Document& srcDoc) {
     Close();
     document_ = &srcDoc;

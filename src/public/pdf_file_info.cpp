@@ -15,13 +15,9 @@ PdfFileInfo::PdfFileInfo(const std::string& inputFile)
 }
 
 PdfFileInfo::PdfFileInfo(const std::string& inputFile,
-                          const std::string& /*password*/)
+                          const std::string& password)
     : input_file_(inputFile) {
-    // v1 stub: password-bound open lands when Document gains
-    // password-validating ctor signature support on the file-path
-    // overload (currently only string/path + bytes-based crypto
-    // open via foundation::encrypt_writer).
-    BindPdf(inputFile);
+    BindPdf(inputFile, password);
 }
 
 PdfFileInfo::PdfFileInfo(Aspose::Pdf::Document& document) {

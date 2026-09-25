@@ -17,6 +17,7 @@
 #include <aspose/pdf/facades/pdf_file_editor.hpp>
 #include <aspose/pdf/page.hpp>
 #include <aspose/pdf/page_collection.hpp>
+#include <aspose/pdf/page_size.hpp>
 #include <aspose/pdf/text_absorber.hpp>
 
 #include "flate.hpp"
@@ -422,4 +423,28 @@ TEST(PdfFileEditorOpsSmoke, AddPageBreak) {
     }
     std::filesystem::remove(out);
 }
+
+TEST(PdfFileEditorOpsSmoke, TryMakeBookletWithPageSize) {
+    const std::string out = Tmp("try_booklet_pagesize.pdf");
+    PdfFileEditor ed;
+    EXPECT_TRUE(ed.TryMakeBooklet(HelloWorldPdf(), out, PageSize::A4()));
+    ASSERT_TRUE(std::filesystem::exists(out));
+    Document re{out};
+    ASSERT_GE(re.Pages().Count(), 1u);
+    EXPECT_FLOAT_EQ(re.Pages()[1].Rect().Width(), PageSize::A4().Width() * 2.0f);
+    EXPECT_FLOAT_EQ(re.Pages()[1].Rect().Height(), PageSize::A4().Height());
+    std::filesystem::remove(out);
+}
+
+TEST(PdfFileEditorOpsSmoke, TryMakeNUpVectorInput) {
+    const std::string out = Tmp("try_nup_vector.pdf");
+    PdfFileEditor ed;
+    std::vector<std::string> inputs{HelloWorldPdf(), HelloWorldPdf()};
+    EXPECT_TRUE(ed.TryMakeNUp(inputs, out, true));
+    ASSERT_TRUE(std::filesystem::exists(out));
+    Document re{out};
+    ASSERT_GE(re.Pages().Count(), 1u);
+    std::filesystem::remove(out);
+}
+
 

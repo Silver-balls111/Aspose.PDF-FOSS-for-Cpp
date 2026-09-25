@@ -17,7 +17,9 @@
 #include <aspose/pdf/facades/form_editor.hpp>
 #include <aspose/pdf/facades/property_flag.hpp>
 #include <aspose/pdf/facades/submit_form_flag.hpp>
+#include <aspose/pdf/forms/checkbox_field.hpp>
 #include <aspose/pdf/forms/form.hpp>
+#include <aspose/pdf/forms/text_box_field.hpp>
 
 #include <gtest/gtest.h>
 
@@ -150,3 +152,31 @@ TEST(FacadesFormEditorSmoke, PropertyRoundtrip) {
     ASSERT_EQ(editor.Items().size(), 2u);
     EXPECT_EQ(editor.Items()[0], "x");
 }
+
+TEST(FacadesFormEditorSmoke, MultiLineTextCreatesMultilineField) {
+    Document doc{HelloWorldPdf()};
+    FormEditor editor{doc};
+    EXPECT_TRUE(editor.AddField(FieldType::MultiLineText, "multi_box", 1,
+                                100, 400, 300, 500));
+    ASSERT_TRUE(doc.Form().HasField("multi_box"));
+    auto* tb = dynamic_cast<Aspose::Pdf::Forms::TextBoxField*>(doc.Form()["multi_box"]);
+    ASSERT_NE(tb, nullptr);
+    EXPECT_TRUE(tb->Multiline());
+}
+
+TEST(FacadesFormEditorSmoke, CopyInnerFieldPreservesFieldType) {
+    Document doc{HelloWorldPdf()};
+    FormEditor editor{doc};
+    EXPECT_TRUE(editor.AddField(FieldType::CheckBox, "check_orig", 1,
+                                100, 500, 120, 520));
+    ASSERT_TRUE(doc.Form().HasField("check_orig"));
+
+    editor.CopyInnerField("check_orig", "check_copy", 1, 150, 500);
+    ASSERT_TRUE(doc.Form().HasField("check_copy"));
+
+    auto* cb = dynamic_cast<Aspose::Pdf::Forms::CheckboxField*>(doc.Form()["check_copy"]);
+    ASSERT_NE(cb, nullptr);
+    EXPECT_EQ(cb->PartialName(), "check_copy");
+    EXPECT_EQ(cb->PageIndex(), 1);
+}
+

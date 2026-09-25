@@ -348,3 +348,58 @@ TEST(PdfBookmarkEditorRealSmoke, XmlAndHtmlExportImport) {
     std::filesystem::remove(htmlFile);
     std::filesystem::remove(pdfOut);
 }
+
+TEST(PdfBookmarkEditorRealSmoke, ExtractBookmarksFiltered) {
+    const std::string out = BmTmp("filtered_bms.pdf");
+    {
+        Document doc{TwoPagesPdf()};
+        PdfBookmarkEditor ed{doc};
+
+        Bookmark parent1;
+        parent1.Title("Chapter 1");
+        parent1.PageNumber(1);
+
+        Bookmark child1;
+        child1.Title("Section 1.1");
+        child1.PageNumber(1);
+
+        Bookmarks kids;
+        kids.push_back(child1);
+        parent1.ChildItems(kids);
+
+        Bookmark parent2;
+        parent2.Title("Chapter 2");
+        parent2.PageNumber(2);
+
+        ed.CreateBookmarks(parent1);
+        ed.CreateBookmarks(parent2);
+        ed.Save(out);
+    }
+
+    Document re{out};
+    PdfBookmarkEditor ed2{re};
+
+    // Filter by title
+    Bookmarks byTitle = ed2.ExtractBookmarks("Chapter 1");
+    ASSERT_EQ(byTitle.size(), 1u);
+    EXPECT_EQ(byTitle[0].Title(), "Chapter 1");
+
+    // Filter by keepLevels = false (only top-level bookmarks)
+    Bookmarks topOnly = ed2.ExtractBookmarks(false);
+    ASSERT_EQ(topOnly.size(), 2u);
+    EXPECT_EQ(topOnly[0].Title(), "Chapter 1");
+    EXPECT_EQ(topOnly[1].Title(), "Chapter 2");
+    EXPECT_EQ(topOnly[0].Level(), 1);
+    EXPECT_EQ(topOnly[1].Level(), 1);
+
+    // Filter by parent bookmark
+    Bookmark p1Query;
+    p1Query.Title("Chapter 1");
+    p1Query.Level(1);
+    Bookmarks children = ed2.ExtractBookmarks(p1Query);
+    ASSERT_EQ(children.size(), 1u);
+    EXPECT_EQ(children[0].Title(), "Section 1.1");
+
+    std::filesystem::remove(out);
+}
+
