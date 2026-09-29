@@ -95,12 +95,60 @@ pre-release). The version follows [Semantic Versioning](https://semver.org).
    git tag -a vX.Y.Z -m "Aspose.PDF FOSS for C++ X.Y.Z"
    git push origin main vX.Y.Z
    ```
-6. **Publish.** The workflow builds and tests Linux x64 (GCC 13) and
-   Windows x64 (MSVC Release + Debug), packages each `cmake --install`
-   tree, compiles and runs `.github/package-test` against every package,
-   and creates a **draft** GitHub release with the archives and
+6. **Publish on GitHub.** The workflow builds and tests Linux x64 (GCC 13)
+   and Windows x64 (MSVC Release + Debug), packages each `cmake --install`
+   tree, and compiles and runs `.github/package-test` against every
+   package. It also builds the NuGet package (see below). It then creates
+   a **draft** GitHub release with the archives, the `.nupkg`, and
    `SHA256SUMS.txt` attached. Review the draft on GitHub and press
    *Publish release*.
+7. **Publish on nuget.org.** The `publish-nuget` job waits for approval
+   in the `nuget-org` environment. Approve it in the workflow run once the
+   GitHub release is published. A version pushed to nuget.org cannot be
+   deleted, only unlisted.
 
 Re-running the workflow for an existing tag replaces the release's assets
-and leaves its notes unchanged.
+and leaves its notes unchanged. nuget.org skips a version that has already
+been pushed.
+
+### NuGet package
+
+The `Aspose.PDF.Cpp.FOSS` package targets Visual Studio (MSBuild) C++
+projects. It contains static libraries for x64, x86, and ARM64, each in
+Release (`/MD`) and Debug (`/MDd`, with embedded `/Z7` debug info), plus
+`build/native/Aspose.PDF.Cpp.FOSS.targets`, which wires up the include
+path, the library, and C++20. The sources are in `nuget/`:
+
+| File | Purpose |
+|------|---------|
+| `nuget/Aspose.PDF.Cpp.FOSS.nuspec` | Package metadata and layout |
+| `nuget/Aspose.PDF.Cpp.FOSS.targets` | MSBuild integration shipped in `build/native/` |
+| `nuget/README.md` | Readme shown on nuget.org |
+| `nuget/pack.ps1` | Builds, tests, packs, and verifies the package |
+| `nuget/test/PackageConsumer.vcxproj` | Visual Studio consumer used to verify the packed `.nupkg` |
+
+To build the package locally (Visual Studio 2022+ with the x64/x86 and
+ARM64 C++ build tools, CMake, and Python 3 are required):
+
+```powershell
+./nuget/pack.ps1                     # all platforms; version from CMakeLists.txt
+./nuget/pack.ps1 -Platforms x64      # quicker, single platform
+```
+
+The script writes `build/nuget/out/Aspose.PDF.Cpp.FOSS.<version>.nupkg`
+and verifies it by building `PackageConsumer.vcxproj` against the packed
+package for every platform and configuration. It runs the result wherever
+the host can; ARM64 is build-only on x64 hosts. To publish by hand:
+
+```powershell
+dotnet nuget push build/nuget/out/Aspose.PDF.Cpp.FOSS.<version>.nupkg `
+  --api-key <key> --source https://api.nuget.org/v3/index.json
+```
+
+One-time setup for automated publishing, under repository **Settings →
+Environments**:
+
+1. Create the environment `nuget-org` and add required reviewers.
+2. Add the environment secret `NUGET_API_KEY`: a nuget.org API key scoped
+   to *Push* for the package `Aspose.PDF.Cpp.FOSS`, created from the
+   nuget.org account that owns the reserved `Aspose.` ID prefix.

@@ -129,6 +129,13 @@ public API through the single-entry header, or include individual headers from `
 #include <aspose.pdf.foss.hpp>
 ```
 
+### Visual Studio (NuGet)
+
+Install the [`Aspose.PDF.Cpp.FOSS`](https://www.nuget.org/packages/Aspose.PDF.Cpp.FOSS) package
+into a C++ project (`Install-Package Aspose.PDF.Cpp.FOSS`). It ships static libraries for x64,
+x86, and ARM64 in Release and Debug. It adds the include path, links the matching library, and
+raises the project to C++20.
+
 ### From a Release Archive
 
 Each [GitHub release](https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/releases) ships

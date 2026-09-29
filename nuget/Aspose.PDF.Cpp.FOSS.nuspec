@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NuGet package for Visual Studio (MSBuild) C++ projects. Built by
+  nuget/pack.ps1, which stages the files below under a base directory and
+  passes $version$ and $commit$. Do not pack this file by hand.
+-->
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata minClientVersion="5.3">
+    <id>Aspose.PDF.Cpp.FOSS</id>
+    <version>$version$</version>
+    <title>Aspose.PDF FOSS for C++</title>
+    <authors>Aspose</authors>
+    <owners>Aspose</owners>
+    <copyright>Copyright (c) 2026 Aspose Pty Ltd</copyright>
+    <license type="expression">MIT AND OFL-1.1</license>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectUrl>https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp</projectUrl>
+    <repository type="git" url="https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp.git" commit="$commit$" />
+    <readme>README.md</readme>
+    <icon>https://products.aspose.com/pdf/images/aspose_pdf-for-cpp.svg</icon>
+    <description>Free, open-source C++20 library for working with PDF documents: open, edit and save PDFs, extract text, render pages to PNG/JPEG/BMP/TIFF, create documents with text, tables, vector graphics, annotations and AcroForm fields, encrypt/decrypt (RC4, AES-128/256) and sign (detached PKCS#7). No third-party runtime dependencies. Native static library for Visual Studio C++ projects: x64, x86 and ARM64, Release and Debug.</description>
+    <summary>Free, open-source, dependency-free C++20 PDF library (native static library for Visual Studio).</summary>
+    <releaseNotes>https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/releases/tag/v$version$</releaseNotes>
+    <tags>pdf c++ cpp cpp20 native nativepackage static-library pdf-rendering text-extraction pdf-generation aspose foss</tags>
+  </metadata>
+  <files>
+    <file src="build\**" target="build" />
+    <file src="licenses\**" target="licenses" />
+    <file src="README.md" target="" />
+  </files>
+</package>

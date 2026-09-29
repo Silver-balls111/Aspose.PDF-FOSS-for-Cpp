@@ -94,6 +94,9 @@ editing, and creating PDF documents, with a public API that is a strict subset o
   and the license texts (MIT, OFL 1.1 for the bundled fonts, third-party notices).
 - Prebuilt release archives for Linux x64 (GCC 13) and Windows x64 (MSVC, Release and Debug), each
   smoke-tested as a `find_package` consumer before publishing.
+- NuGet package `Aspose.PDF.Cpp.FOSS` for Visual Studio C++ projects: static libraries for x64,
+  x86, and ARM64 (Release `/MD` and Debug `/MDd`). Its MSBuild `.targets` adds the include path,
+  links the matching library, and raises the project to C++20.
 - MSVC warning C4250 (inheritance via dominance in the facade hierarchy) is suppressed inside the
   facade headers, so consumers building at `/W4` see no warnings from the library.
 - 12 runnable examples under `examples/` and a GoogleTest suite; CI on Linux (GCC 13, Clang 16)
