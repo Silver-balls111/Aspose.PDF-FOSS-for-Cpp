@@ -122,13 +122,35 @@ flowchart TD
 
 ## Installation
 
-This library builds as a static library you link into your project. Add it as a subdirectory of
-your CMake build:
+This library builds as a static library you link into your project. Either way, include the whole
+public API through the single-entry header, or include individual headers from `aspose/pdf/`:
+
+```cpp
+#include <aspose.pdf.foss.hpp>
+```
+
+### From a Release Archive
+
+Each [GitHub release](https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/releases) ships
+prebuilt archives for Linux x64 (GCC 13) and Windows x64 (MSVC, with Release and Debug libraries).
+Each archive contains the public headers, the static library, and a CMake package. Extract it and
+point `CMAKE_PREFIX_PATH` at the extracted folder:
+
+```cmake
+find_package(aspose_pdf_foss 1.0 CONFIG REQUIRED)
+target_link_libraries(your_app PRIVATE aspose_pdf_foss::aspose_pdf_foss)
+```
+
+The same package is produced by `cmake --install build --prefix <dir>` from a source build.
+
+### As a CMake Subdirectory
 
 ```cmake
 add_subdirectory(aspose.pdf-foss-for-cpp)
-target_link_libraries(your_app PRIVATE aspose_pdf_foss)
+target_link_libraries(your_app PRIVATE aspose_pdf_foss::aspose_pdf_foss)
 ```
+
+Both forms of the target make your code compile as C++20.
 
 ### Requirements
 
@@ -238,7 +260,7 @@ namespace txt = Aspose::Pdf::Text;
 namespace draw = Aspose::Pdf::Drawing;
 
 pdf::Document doc;
-pdf::Page& page = doc.Pages().Add();
+pdf::Page page = doc.Pages().Add();   // Page is a lightweight handle
 page.SetPageSize(595.0, 842.0);
 
 // Positioned text
@@ -844,6 +866,7 @@ most-used entry points follows below it.
 - **[Getting started guide](https://docs.aspose.org/pdf/cpp/)** — installation, walkthroughs, and feature guides for this library.
 - **[How-to guides & FAQ](https://kb.aspose.org/pdf/cpp/)** — task-focused answers for common PDF-processing questions.
 - **[Full API reference](https://reference.aspose.org/pdf/cpp/)** — the complete, browsable reference for all 244 public types (the [API Reference](#api-reference) section above covers the essentials).
+- **[Changelog](CHANGELOG.md)** — what changed in each release.
 - **[Contributing guide](CONTRIBUTING.md)** — how to propose changes and the project's coding conventions.
 - Found a bug or have a feature request? [Open an issue](https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/issues) on GitHub.
 

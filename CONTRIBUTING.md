@@ -51,7 +51,10 @@ API.
   density). The codebase is C++20 and dependency-free at runtime — please
   keep it that way; do not introduce third-party runtime dependencies.
 - Keep public headers under `include/aspose/pdf/` clean: the public
-  surface mirrors the canonical Aspose.PDF API names and shapes.
+  surface mirrors the canonical Aspose.PDF API names and shapes. Public
+  headers must never include anything from `include/internal/`, because
+  only `include/aspose/` is installed. When you add a public header, also
+  add it to the single-entry header `include/aspose.pdf.foss.hpp`.
 - Add or update tests under `tests/` for any behavioural change, and make
   sure `ctest` is green before opening a pull request.
 
@@ -64,3 +67,40 @@ API.
 
 By submitting a contribution you agree that it is licensed under the
 project's [MIT License](LICENSE).
+
+## Releasing
+
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml)
+when a `vX.Y.Z` tag is pushed (`vX.Y.Z-rc.1` and similar produce a
+pre-release). The version follows [Semantic Versioning](https://semver.org).
+
+1. **Bump the version** in `project(Aspose_PDF_FOSS VERSION X.Y.Z ...)` in
+   `CMakeLists.txt`. The workflow fails if the tag and this version
+   differ. If the major version changes, also update the version in
+   `find_package(aspose_pdf_foss X.Y ...)` in
+   `.github/package-test/CMakeLists.txt`.
+2. **Update `CHANGELOG.md`.** Move the `[Unreleased]` entries into a new
+   `## [X.Y.Z] - YYYY-MM-DD` section and update the compare links at the
+   bottom.
+3. **Write release notes** (optional). The GitHub release body is taken from
+   `.github/release-notes/vX.Y.Z.md` when that file exists, and otherwise
+   from the `## [X.Y.Z]` section of `CHANGELOG.md`.
+4. **Dry-run the packaging** (optional). Run the *Release* workflow by hand
+   on your branch (Actions → Release → Run workflow). It builds and tests
+   the archives and uploads them as workflow artifacts, without creating a
+   release.
+5. **Commit, tag, and push:**
+   ```bash
+   git commit -am "Release X.Y.Z"
+   git tag -a vX.Y.Z -m "Aspose.PDF FOSS for C++ X.Y.Z"
+   git push origin main vX.Y.Z
+   ```
+6. **Publish.** The workflow builds and tests Linux x64 (GCC 13) and
+   Windows x64 (MSVC Release + Debug), packages each `cmake --install`
+   tree, compiles and runs `.github/package-test` against every package,
+   and creates a **draft** GitHub release with the archives and
+   `SHA256SUMS.txt` attached. Review the draft on GitHub and press
+   *Publish release*.
+
+Re-running the workflow for an existing tag replaces the release's assets
+and leaves its notes unchanged.
