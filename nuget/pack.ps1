@@ -21,7 +21,7 @@
 
 .EXAMPLE
   ./nuget/pack.ps1
-  ./nuget/pack.ps1 -Version 1.0.0-rc.1 -Platforms x64 -OutputDir dist
+  ./nuget/pack.ps1 -Version <X.Y.Z>-rc.1 -Platforms x64 -OutputDir dist
 
 .NOTES
   Publishing is a separate, explicit step:
@@ -162,6 +162,9 @@ $licenseDir = Join-Path $StageDir 'licenses'
 New-Item -ItemType Directory -Force $licenseDir | Out-Null
 Copy-Item (Join-Path $firstInstall 'share\doc\aspose_pdf_foss\*') $licenseDir
 Copy-Item (Join-Path $PSScriptRoot 'README.md') $StageDir
+# 128x128 PNG rendered from https://products.aspose.com/pdf/images/aspose_pdf-for-cpp.svg
+# (NuGet accepts only PNG/JPEG icons packed inside the package).
+Copy-Item (Join-Path $PSScriptRoot 'icon.png') $StageDir
 
 # ── 3. Pack ──────────────────────────────────────────────────────────────
 $nuget = Get-NuGetExe

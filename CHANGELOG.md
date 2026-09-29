@@ -9,6 +9,23 @@ headers installed under `include/aspose/` plus `include/aspose.pdf.foss.hpp`; an
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-29
+
+Packaging-only release; the library code and public API are unchanged from 1.0.0.
+
+### Added
+
+- NuGet package `Aspose.PDF.Cpp.FOSS` for Visual Studio C++ projects: static libraries for x64,
+  x86, and ARM64 (Release `/MD` and Debug `/MDd`). Its MSBuild `.targets` adds the include path,
+  links the matching library, and raises the project to C++20; it warns when a project uses the
+  static CRT. The release workflow builds the package, verifies it with a Visual Studio consumer
+  project, attaches it to the GitHub release, and publishes it to nuget.org after manual approval.
+
+### Fixed
+
+- The Debug library in the Windows release archive now embeds its debug information (`/Z7`), so
+  linking it no longer produces LNK4099 "PDB not found" warnings.
+
 ## [1.0.0] - 2026-09-29
 
 First public release: a free, open-source, dependency-free C++20 library for reading, rendering,
@@ -94,9 +111,6 @@ editing, and creating PDF documents, with a public API that is a strict subset o
   and the license texts (MIT, OFL 1.1 for the bundled fonts, third-party notices).
 - Prebuilt release archives for Linux x64 (GCC 13) and Windows x64 (MSVC, Release and Debug), each
   smoke-tested as a `find_package` consumer before publishing.
-- NuGet package `Aspose.PDF.Cpp.FOSS` for Visual Studio C++ projects: static libraries for x64,
-  x86, and ARM64 (Release `/MD` and Debug `/MDd`). Its MSBuild `.targets` adds the include path,
-  links the matching library, and raises the project to C++20.
 - MSVC warning C4250 (inheritance via dominance in the facade hierarchy) is suppressed inside the
   facade headers, so consumers building at `/W4` see no warnings from the library.
 - 12 runnable examples under `examples/` and a GoogleTest suite; CI on Linux (GCC 13, Clang 16)
@@ -112,5 +126,6 @@ editing, and creating PDF documents, with a public API that is a strict subset o
   patch an existing `/Info` object.
 - Encryption permissions are enforced by PDF viewers, not by this library.
 
-[Unreleased]: https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/releases/tag/v1.0.0

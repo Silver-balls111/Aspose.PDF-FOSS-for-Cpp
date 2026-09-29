@@ -17,7 +17,7 @@
     <projectUrl>https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp</projectUrl>
     <repository type="git" url="https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp.git" commit="$commit$" />
     <readme>README.md</readme>
-    <icon>https://products.aspose.com/pdf/images/aspose_pdf-for-cpp.svg</icon>
+    <icon>icon.png</icon>
     <description>Free, open-source C++20 library for working with PDF documents: open, edit and save PDFs, extract text, render pages to PNG/JPEG/BMP/TIFF, create documents with text, tables, vector graphics, annotations and AcroForm fields, encrypt/decrypt (RC4, AES-128/256) and sign (detached PKCS#7). No third-party runtime dependencies. Native static library for Visual Studio C++ projects: x64, x86 and ARM64, Release and Debug.</description>
     <summary>Free, open-source, dependency-free C++20 PDF library (native static library for Visual Studio).</summary>
     <releaseNotes>https://github.com/aspose-pdf-foss/Aspose.PDF-FOSS-for-Cpp/releases/tag/v$version$</releaseNotes>
@@ -27,5 +27,6 @@
     <file src="build\**" target="build" />
     <file src="licenses\**" target="licenses" />
     <file src="README.md" target="" />
+    <file src="icon.png" target="" />
   </files>
 </package>
