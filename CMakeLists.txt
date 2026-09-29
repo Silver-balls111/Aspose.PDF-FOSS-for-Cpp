@@ -309,6 +309,15 @@ target_compile_options(aspose_pdf_foss PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /MP>
 )
 
+# C4250 ("inherits ... via dominance") fires for every facade class:
+# IFacade is a virtual base reached through both Facade and
+# ISaveableFacade, and Facade's BindPdf/Close overrides win by
+# dominance. That is the intended resolution, so the warning is noise. PUBLIC so tests, examples and downstream consumers that
+# include the public headers don't see it either.
+target_compile_options(aspose_pdf_foss PUBLIC
+  $<$<CXX_COMPILER_ID:MSVC>:/wd4250>
+)
+
 # ──────────────────────────────────────────────────────────────────────────
 # Tests
 # ──────────────────────────────────────────────────────────────────────────

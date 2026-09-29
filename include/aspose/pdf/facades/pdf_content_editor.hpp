@@ -27,6 +27,13 @@ namespace Aspose::Pdf {
 class Document;
 }
 
+// MSVC C4250: BindPdf/Close are inherited from Facade by dominance over
+// the virtual IFacade base also reached via ISaveableFacade — intended.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4250)
+#endif
+
 namespace Aspose::Pdf::Facades {
 
 class PdfContentEditor : public SaveableFacade {
@@ -82,3 +89,7 @@ public:
 };
 
 }  // namespace Aspose::Pdf::Facades
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
