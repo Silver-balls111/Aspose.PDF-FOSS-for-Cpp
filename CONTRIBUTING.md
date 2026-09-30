@@ -51,7 +51,10 @@ API.
   density). The codebase is C++20 and dependency-free at runtime — please
   keep it that way; do not introduce third-party runtime dependencies.
 - Keep public headers under `include/aspose/pdf/` clean: the public
-  surface mirrors the canonical Aspose.PDF API names and shapes.
+  surface mirrors the canonical Aspose.PDF API names and shapes. Public
+  headers must never include anything from `include/internal/`, because
+  only `include/aspose/` is installed. When you add a public header, also
+  add it to the single-entry header `include/aspose.pdf.foss.hpp`.
 - Add or update tests under `tests/` for any behavioural change, and make
   sure `ctest` is green before opening a pull request.
 
@@ -64,3 +67,88 @@ API.
 
 By submitting a contribution you agree that it is licensed under the
 project's [MIT License](LICENSE).
+
+## Releasing
+
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml)
+when a `vX.Y.Z` tag is pushed (`vX.Y.Z-rc.1` and similar produce a
+pre-release). The version follows [Semantic Versioning](https://semver.org).
+
+1. **Bump the version** in `project(Aspose_PDF_FOSS VERSION X.Y.Z ...)` in
+   `CMakeLists.txt`. The workflow fails if the tag and this version
+   differ. If the major version changes, also update the version in
+   `find_package(aspose_pdf_foss X.Y ...)` in
+   `.github/package-test/CMakeLists.txt`.
+2. **Update `CHANGELOG.md`.** Move the `[Unreleased]` entries into a new
+   `## [X.Y.Z] - YYYY-MM-DD` section and update the compare links at the
+   bottom.
+3. **Write release notes** (optional). The GitHub release body is taken from
+   `.github/release-notes/vX.Y.Z.md` when that file exists, and otherwise
+   from the `## [X.Y.Z]` section of `CHANGELOG.md`.
+4. **Dry-run the packaging** (optional). Run the *Release* workflow by hand
+   on your branch (Actions → Release → Run workflow). It builds and tests
+   the archives and uploads them as workflow artifacts, without creating a
+   release.
+5. **Commit, tag, and push:**
+   ```bash
+   git commit -am "Release X.Y.Z"
+   git tag -a vX.Y.Z -m "Aspose.PDF FOSS for C++ X.Y.Z"
+   git push origin main vX.Y.Z
+   ```
+6. **Publish on GitHub.** The workflow builds and tests Linux x64 (GCC 13)
+   and Windows x64 (MSVC Release + Debug), packages each `cmake --install`
+   tree, and compiles and runs `.github/package-test` against every
+   package. It also builds the NuGet package (see below). It then creates
+   a **draft** GitHub release with the archives, the `.nupkg`, and
+   `SHA256SUMS.txt` attached. Review the draft on GitHub and press
+   *Publish release*.
+7. **Publish on nuget.org.** The `publish-nuget` job waits for approval
+   in the `nuget-org` environment. Approve it in the workflow run once the
+   GitHub release is published. A version pushed to nuget.org cannot be
+   deleted, only unlisted.
+
+Re-running the workflow for an existing tag replaces the release's assets
+and leaves its notes unchanged. nuget.org skips a version that has already
+been pushed.
+
+### NuGet package
+
+The `Aspose.PDF.Cpp.FOSS` package targets Visual Studio (MSBuild) C++
+projects. It contains static libraries for x64, x86, and ARM64, each in
+Release (`/MD`) and Debug (`/MDd`, with embedded `/Z7` debug info), plus
+`build/native/Aspose.PDF.Cpp.FOSS.targets`, which wires up the include
+path, the library, and C++20. The sources are in `nuget/`:
+
+| File | Purpose |
+|------|---------|
+| `nuget/Aspose.PDF.Cpp.FOSS.nuspec` | Package metadata and layout |
+| `nuget/Aspose.PDF.Cpp.FOSS.targets` | MSBuild integration shipped in `build/native/` |
+| `nuget/README.md` | Readme shown on nuget.org |
+| `nuget/pack.ps1` | Builds, tests, packs, and verifies the package |
+| `nuget/test/PackageConsumer.vcxproj` | Visual Studio consumer used to verify the packed `.nupkg` |
+
+To build the package locally (Visual Studio 2022+ with the x64/x86 and
+ARM64 C++ build tools, CMake, and Python 3 are required):
+
+```powershell
+./nuget/pack.ps1                     # all platforms; version from CMakeLists.txt
+./nuget/pack.ps1 -Platforms x64      # quicker, single platform
+```
+
+The script writes `build/nuget/out/Aspose.PDF.Cpp.FOSS.<version>.nupkg`
+and verifies it by building `PackageConsumer.vcxproj` against the packed
+package for every platform and configuration. It runs the result wherever
+the host can; ARM64 is build-only on x64 hosts. To publish by hand:
+
+```powershell
+dotnet nuget push build/nuget/out/Aspose.PDF.Cpp.FOSS.<version>.nupkg `
+  --api-key <key> --source https://api.nuget.org/v3/index.json
+```
+
+One-time setup for automated publishing, under repository **Settings →
+Environments**:
+
+1. Create the environment `nuget-org` and add required reviewers.
+2. Add the environment secret `NUGET_API_KEY`: a nuget.org API key scoped
+   to *Push* for the package `Aspose.PDF.Cpp.FOSS`, created from the
+   nuget.org account that owns the reserved `Aspose.` ID prefix.

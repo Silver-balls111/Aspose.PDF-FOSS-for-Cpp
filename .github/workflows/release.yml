@@ -1,0 +1,333 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (or vX.Y.Z-suffix for a pre-release) builds and
+# tests the library on every supported toolchain, packages the install
+# tree, smoke-tests each package as a find_package() consumer, builds
+# the Aspose.PDF.Cpp.FOSS NuGet package (x64/x86/ARM64, tested as a
+# Visual Studio consumer), and creates a DRAFT GitHub Release with the
+# archives, the .nupkg and SHA256SUMS.txt attached. Review the draft on
+# GitHub and press "Publish release".
+#
+# The nuget.org push (publish-nuget) waits for approval in the
+# `nuget-org` environment; approve it after publishing the GitHub
+# release.
+#
+# Running the workflow by hand (Actions → Release → Run workflow) on a
+# branch is a dry run: packages are built and uploaded as workflow
+# artifacts, but no release is created. Run it on a tag to (re)build
+# that tag's release assets.
+#
+# See CONTRIBUTING.md → "Releasing" for the full checklist.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      is_release: ${{ steps.meta.outputs.is_release }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve version and validate tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^project(Aspose_PDF_FOSS VERSION \([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' CMakeLists.txt)
+          if [ -z "$version" ]; then
+            echo "::error::Could not read project VERSION from CMakeLists.txt"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "Dry run on ${GITHUB_REF_NAME}: packages only, no release (version $version)."
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          tag="${GITHUB_REF_NAME}"
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Tag '$tag' is not of the form vX.Y.Z or vX.Y.Z-suffix"; exit 1
+          fi
+          base="${tag#v}"; base="${base%%-*}"
+          if [ "$base" != "$version" ]; then
+            echo "::error::Tag $tag does not match project(VERSION $version) in CMakeLists.txt"; exit 1
+          fi
+          if [ ! -f ".github/release-notes/${tag}.md" ] && ! grep -q "^## \[${version}\]" CHANGELOG.md; then
+            echo "::error::No release notes: add .github/release-notes/${tag}.md or a '## [${version}]' section to CHANGELOG.md"; exit 1
+          fi
+          echo "is_release=true" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Package ${{ matrix.name }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: linux-x64-gcc13
+            os: ubuntu-24.04
+            cc: gcc-13
+            cxx: g++-13
+            archive: tar.gz
+          - name: windows-x64-msvc
+            os: windows-latest
+            archive: zip
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PKG: aspose-pdf-foss-cpp-${{ needs.prepare.outputs.version }}-${{ matrix.name }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      # ── Linux: single-config Release, PIC so the static library can
+      #    also be linked into consumers' shared objects.
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: >
+          cmake -S . -B build -Wno-dev
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: cmake --build build --parallel 4
+
+      # ── Windows: Visual Studio multi-config; ship Release and Debug
+      #    libraries side by side (Debug gets a 'd' postfix) so /MD and
+      #    /MDd consumers both link cleanly.
+      # Embedded debug info (/Z7) keeps the Debug library self-contained,
+      # so consumers get no LNK4099 "PDB not found" warnings.
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          cmake -S . -B build -Wno-dev -A x64 -DCMAKE_DEBUG_POSTFIX=d
+          -DCMAKE_POLICY_DEFAULT_CMP0141=NEW
+          -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake --build build --config Release --parallel 4
+          cmake --build build --config Debug --target aspose_pdf_foss --parallel 4
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Install to staging tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --install build --config Release --prefix "stage/$PKG"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake --install build --config Debug --prefix "stage/$PKG"
+          fi
+          cp README.md CHANGELOG.md "stage/$PKG/"
+
+      - name: Record build info
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "Aspose.PDF FOSS for C++ ${VERSION}"
+            echo "Package:   ${PKG}"
+            echo "Commit:    ${GITHUB_SHA}"
+            echo "Ref:       ${GITHUB_REF_NAME}"
+            echo "Runner:    ${ImageOS:-unknown} ${ImageVersion:-}"
+            echo "Built:     $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            grep -E '^CMAKE_(CXX_COMPILER|CXX_COMPILER_VERSION|GENERATOR|BUILD_TYPE|POSITION_INDEPENDENT_CODE|DEBUG_POSTFIX)[:=]' \
+              build/CMakeCache.txt || true
+            grep -h -E '^set\(CMAKE_CXX_COMPILER_(ID|VERSION) ' build/CMakeFiles/*/CMakeCXXCompiler.cmake || true
+          } > "stage/$PKG/BUILDINFO.txt"
+          cat "stage/$PKG/BUILDINFO.txt"
+
+      # Consume the staged package exactly as a user would.
+      - name: Smoke-test package (find_package consumer)
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$PWD/stage/$PKG"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake -S .github/package-test -B build-pkgtest -A x64 -DCMAKE_PREFIX_PATH="$prefix"
+            for cfg in Release Debug; do
+              cmake --build build-pkgtest --config "$cfg"
+              ctest --test-dir build-pkgtest --build-config "$cfg" --output-on-failure
+            done
+          else
+            CXX=${{ matrix.cxx }} cmake -S .github/package-test -B build-pkgtest \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$prefix"
+            cmake --build build-pkgtest
+            ctest --test-dir build-pkgtest --output-on-failure
+          fi
+
+      - name: Create archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cd stage
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            cmake -E tar cf "../dist/$PKG.zip" --format=zip "$PKG"
+          else
+            cmake -E tar czf "../dist/$PKG.tar.gz" "$PKG"
+          fi
+          ls -l ../dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  nuget:
+    name: Package NuGet (x64, x86, ARM64)
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      # nuget/pack.ps1 builds and tests every platform, packs the .nupkg,
+      # then builds and runs nuget/test/PackageConsumer.vcxproj against the
+      # packed package (ARM64 is build-only on the x64 runner).
+      - name: Build, test and pack
+        shell: pwsh
+        run: |
+          $version = $env:VERSION
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $version = $env:GITHUB_REF_NAME.TrimStart('v') }
+          ./nuget/pack.ps1 -Version $version -OutputDir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: dist/*.nupkg
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: GitHub Release
+    needs: [prepare, build, nuget]
+    if: needs.prepare.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Notes come from .github/release-notes/<tag>.md when present,
+      # otherwise from the matching "## [X.Y.Z]" section of CHANGELOG.md.
+      - name: Assemble release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f ".github/release-notes/${TAG}.md" ]; then
+            cp ".github/release-notes/${TAG}.md" notes.md
+          else
+            awk -v hdr="## [${VERSION}]" '
+              index($0, hdr) == 1 { found = 1; next }
+              found && /^## \[/   { exit }
+              found               { print }
+            ' CHANGELOG.md > notes.md
+          fi
+          test -s notes.md
+          cat notes.md
+
+      - name: Create or update draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — replacing its assets."
+            gh release upload "$TAG" dist/* --clobber
+          else
+            flags=(--draft --verify-tag --title "Aspose.PDF FOSS for C++ ${TAG#v}" --notes-file notes.md)
+            if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+            gh release create "$TAG" dist/* "${flags[@]}"
+          fi
+
+  # Pushes the .nupkg to nuget.org. Runs in the `nuget-org` environment:
+  # configure it (Settings → Environments) with required reviewers so each
+  # publish waits for manual approval, and store the nuget.org API key as
+  # the environment secret NUGET_API_KEY. A version pushed to nuget.org
+  # cannot be deleted, only unlisted.
+  publish-nuget:
+    name: Publish to nuget.org
+    needs: [prepare, release]
+    if: needs.prepare.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: nuget-org
+      url: https://www.nuget.org/packages/Aspose.PDF.Cpp.FOSS
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nuget-package
+          path: nupkg
+
+      - name: Push
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NUGET_API_KEY}" ]; then
+            echo "::error::Secret NUGET_API_KEY is not set for the nuget-org environment"; exit 1
+          fi
+          dotnet nuget push nupkg/*.nupkg \
+            --api-key "${NUGET_API_KEY}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

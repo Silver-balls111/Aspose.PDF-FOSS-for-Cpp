@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Aspose.PDF.Cpp.FOSS — MSBuild integration for Visual Studio C++ projects.
+
+  Imported automatically by NuGet (packages.config or PackageReference).
+  Adds the public include directory, links the static library that matches
+  the project's platform and configuration, and switches the project to
+  C++20 when it is on an older language standard.
+
+  Library layout inside the package:
+    build\native\include\                          public headers
+    build\native\lib\<x64|x86|ARM64>\Release\       /MD  (Release CRT)
+    build\native\lib\<x64|x86|ARM64>\Debug\         /MDd (Debug CRT)
+
+  The Debug library is chosen when $(UseDebugLibraries) is true (the Visual
+  Studio default for Debug configurations), the Release library otherwise.
+
+  Opt-outs (set in the project before this file is imported, e.g. in a
+  Directory.Build.props):
+    <AsposePdfFossSetLanguageStandard>false</AsposePdfFossSetLanguageStandard>
+    <AsposePdfFossLinkLibrary>false</AsposePdfFossLinkLibrary>
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <PropertyGroup>
+    <AsposePdfFossRoot>$(MSBuildThisFileDirectory)</AsposePdfFossRoot>
+    <AsposePdfFossArch Condition="'$(Platform)' == 'x64'">x64</AsposePdfFossArch>
+    <AsposePdfFossArch Condition="'$(Platform)' == 'Win32' or '$(Platform)' == 'x86'">x86</AsposePdfFossArch>
+    <AsposePdfFossArch Condition="'$(Platform)' == 'ARM64'">ARM64</AsposePdfFossArch>
+    <AsposePdfFossConfiguration Condition="'$(UseDebugLibraries)' == 'true'">Debug</AsposePdfFossConfiguration>
+    <AsposePdfFossConfiguration Condition="'$(AsposePdfFossConfiguration)' == ''">Release</AsposePdfFossConfiguration>
+    <AsposePdfFossLibDir>$(AsposePdfFossRoot)lib\$(AsposePdfFossArch)\$(AsposePdfFossConfiguration)\</AsposePdfFossLibDir>
+    <AsposePdfFossSetLanguageStandard Condition="'$(AsposePdfFossSetLanguageStandard)' == ''">true</AsposePdfFossSetLanguageStandard>
+    <AsposePdfFossLinkLibrary Condition="'$(AsposePdfFossLinkLibrary)' == ''">true</AsposePdfFossLinkLibrary>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(AsposePdfFossRoot)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <!-- The public headers need C++20 (std::span etc.). Raise older
+       standards; leave stdcpp20, stdcpplatest and newer untouched. -->
+  <ItemDefinitionGroup Condition="'$(AsposePdfFossSetLanguageStandard)' == 'true'">
+    <ClCompile>
+      <LanguageStandard Condition="'%(ClCompile.LanguageStandard)' == '' or '%(ClCompile.LanguageStandard)' == 'Default' or '%(ClCompile.LanguageStandard)' == 'stdcpp14' or '%(ClCompile.LanguageStandard)' == 'stdcpp17'">stdcpp20</LanguageStandard>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(AsposePdfFossLinkLibrary)' == 'true' and '$(AsposePdfFossArch)' != ''">
+    <Link>
+      <AdditionalLibraryDirectories>$(AsposePdfFossLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>aspose_pdf_foss.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <Target Name="AsposePdfFossCheckPlatform"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(AsposePdfFossLinkLibrary)' == 'true' and '$(AsposePdfFossArch)' == ''">
+    <Error Text="Aspose.PDF.Cpp.FOSS: platform '$(Platform)' is not supported. Supported platforms: x64, Win32 (x86), ARM64." />
+  </Target>
+
+  <!-- The libraries are built against the DLL CRT. Linking them into a
+       static-CRT (/MT, /MTd) project fails with LNK2038; say why up front. -->
+  <Target Name="AsposePdfFossCheckRuntime"
+          BeforeTargets="ClCompile"
+          Condition="'$(AsposePdfFossLinkLibrary)' == 'true' and '@(ClCompile)' != ''">
+    <Warning Condition="'%(ClCompile.RuntimeLibrary)' == 'MultiThreaded' or '%(ClCompile.RuntimeLibrary)' == 'MultiThreadedDebug'"
+             Text="Aspose.PDF.Cpp.FOSS: the library is built with the DLL runtime (/MD, /MDd), but this project uses %(ClCompile.RuntimeLibrary). Switch C/C++ > Code Generation > Runtime Library to Multi-threaded DLL (/MD) or Multi-threaded Debug DLL (/MDd) to avoid LNK2038." />
+  </Target>
+
+</Project>

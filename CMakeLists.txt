@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Aspose_PDF_FOSS VERSION 1.0.0 LANGUAGES CXX)
+project(Aspose_PDF_FOSS VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +32,9 @@ FetchContent_Declare(
   URL      https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
   URL_HASH SHA256=8ad598c73ad796e0d8280b082cebd82a630d73e73cd3c70057938a6501bba5d7
 )
+# Test-only dependency: keep GoogleTest out of `cmake --install` so the
+# installed tree / release archives contain only this library.
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -279,6 +282,9 @@ set_source_files_properties(
   PROPERTIES OBJECT_DEPENDS "${STANDARD14_OUTLINES_INC}")
 
 add_library(aspose_pdf_foss STATIC ${ASPOSE_PDF_FOSS_SOURCES})
+# PUBLIC so consumers (in-tree or via find_package) also compile as C++20:
+# the public headers use std::span and other C++20 library features.
+target_compile_features(aspose_pdf_foss PUBLIC cxx_std_20)
 target_include_directories(aspose_pdf_foss
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
@@ -307,6 +313,15 @@ target_include_directories(aspose_pdf_foss
 # GCC / Clang accept UTF-8 by default and need no equivalent flag.
 target_compile_options(aspose_pdf_foss PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /MP>
+)
+
+# C4250 ("inherits ... via dominance") fires for every facade class:
+# IFacade is a virtual base reached through both Facade and
+# ISaveableFacade, and Facade's BindPdf/Close overrides win by
+# dominance. That is the intended resolution, so the warning is noise. PUBLIC so tests, examples and downstream consumers that
+# include the public headers don't see it either.
+target_compile_options(aspose_pdf_foss PUBLIC
+  $<$<CXX_COMPILER_ID:MSVC>:/wd4250>
 )
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -364,10 +379,59 @@ endif()
 # ──────────────────────────────────────────────────────────────────────────
 add_subdirectory(examples)
 
+# ──────────────────────────────────────────────────────────────────────────
+# Install + CMake package export
+# ──────────────────────────────────────────────────────────────────────────
+# Consumers of an installed tree (or a release archive) use
+#   find_package(aspose_pdf_foss CONFIG REQUIRED)
+#   target_link_libraries(app PRIVATE aspose_pdf_foss::aspose_pdf_foss)
+# The alias lets add_subdirectory() consumers spell it the same way.
+add_library(aspose_pdf_foss::aspose_pdf_foss ALIAS aspose_pdf_foss)
+
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+set(ASPOSE_PDF_FOSS_CMAKE_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/aspose_pdf_foss)
+
 install(TARGETS aspose_pdf_foss
+  EXPORT aspose_pdf_foss_targets
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} OPTIONAL)
+# Public headers only — include/internal/ is implementation detail and
+# no public header includes it.
+install(DIRECTORY include/aspose DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES include/aspose.pdf.foss.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+install(EXPORT aspose_pdf_foss_targets
+  FILE aspose_pdf_fossTargets.cmake
+  NAMESPACE aspose_pdf_foss::
+  DESTINATION ${ASPOSE_PDF_FOSS_CMAKE_DIR}
+)
+configure_package_config_file(
+  cmake/aspose_pdf_fossConfig.cmake.in
+  ${CMAKE_BINARY_DIR}/aspose_pdf_fossConfig.cmake
+  INSTALL_DESTINATION ${ASPOSE_PDF_FOSS_CMAKE_DIR}
+)
+write_basic_package_version_file(
+  ${CMAKE_BINARY_DIR}/aspose_pdf_fossConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+install(FILES
+  ${CMAKE_BINARY_DIR}/aspose_pdf_fossConfig.cmake
+  ${CMAKE_BINARY_DIR}/aspose_pdf_fossConfigVersion.cmake
+  DESTINATION ${ASPOSE_PDF_FOSS_CMAKE_DIR}
+)
+
+# License texts travel with the binaries: MIT for the library, and the
+# OFL 1.1 for the Liberation fonts compiled into it (the OFL requires
+# the license to accompany redistributed font data).
+install(FILES
+  LICENSE
+  THIRD_PARTY_NOTICES.md
+  src/internal/standard14_outlines.fonts/OFL.txt
+  src/internal/standard14_outlines.fonts/AUTHORS
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/aspose_pdf_foss
+)

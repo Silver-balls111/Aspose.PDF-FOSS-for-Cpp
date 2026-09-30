@@ -4,7 +4,6 @@
 #include <aspose/pdf/page.hpp>
 
 #include "text_extractor.hpp"
-#include "encoding.hpp"
 
 #include <cstring>
 #include <ostream>
@@ -14,17 +13,17 @@
 namespace Aspose::Pdf::Devices {
 
 TextDevice::TextDevice()
-    : encoding_(&::foundation::encoding::Encoding::UTF8()) {}
+    : encoding_(&::Aspose::Pdf::Text::Encoding::UTF8()) {}
 
-TextDevice::TextDevice(const ::foundation::encoding::Encoding& encoding)
+TextDevice::TextDevice(const ::Aspose::Pdf::Text::Encoding& encoding)
     : encoding_(&encoding) {}
 
-const ::foundation::encoding::Encoding& TextDevice::GetEncoding() const noexcept {
+const ::Aspose::Pdf::Text::Encoding& TextDevice::GetEncoding() const noexcept {
     return *encoding_;
 }
 
 void TextDevice::SetEncoding(
-    const ::foundation::encoding::Encoding& encoding) noexcept {
+    const ::Aspose::Pdf::Text::Encoding& encoding) noexcept {
     encoding_ = &encoding;
 }
 

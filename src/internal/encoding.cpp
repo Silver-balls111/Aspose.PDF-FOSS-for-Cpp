@@ -5,11 +5,12 @@
 #include <cctype>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace foundation::encoding {
+namespace Aspose::Pdf::Text {
 
 namespace {
 
@@ -400,4 +401,4 @@ std::span<const std::byte> Encoding::Preamble() const noexcept {
     return {};
 }
 
-}  // namespace foundation::encoding
+}  // namespace Aspose::Pdf::Text
